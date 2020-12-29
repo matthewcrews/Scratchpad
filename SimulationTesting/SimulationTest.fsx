@@ -58,7 +58,7 @@ module Types =
         Day : int
         Temperature : float
         Condition : string
-        Demand : Demand
+        Demand : int
     }
 
     [<CLIMutable>]
@@ -126,7 +126,7 @@ module DemandSimulation =
 
     module DemandSimulationResult =
 
-        let create (Day day) (Temperature temperature) (condition: Condition) (demand) =
+        let create (Day day) (Temperature temperature) (condition: Condition) (Demand demand) =
 
             {
                 Day = day
@@ -140,8 +140,7 @@ module DemandSimulation =
             }
 
         let demand (d: DemandSimulationResult) =
-            let (Demand d) = d.Demand
-            d
+            d.Demand
 
     let private conditions = 
         [
