@@ -52,9 +52,16 @@ module Types =
                 | Pizza -> "Pizza"
                 | Taco -> "Taco"
 
+    type DemandSimulationResult = {
+        Day : Day
+        Temperature : Temperature
+        Condition : Condition
+        Demand : Demand
+    }
+
     [<CLIMutable>]
     [<DelimitedRecord(",")>]
-    type DemandSimulationResult = {
+    type DemandSimulationRecord = {
         Day : int
         Temperature : float
         Condition : string
@@ -97,6 +104,82 @@ module Types =
     type InventoryPlan = InventoryPlan of Map<Food, Inventory>
 
 
+module Condition =
+
+    open Types
+
+    let ofString (s: string) =
+        match s.ToUpper() with
+        | "Sunny" -> Sunny
+        | "Rainy"-> Rainy
+        | "Cloudy" -> Cloudy
+        | _ -> invalidArg (nameof s) "Invalid string for Condition"
+
+    let toString (c: Condition) =
+        match c with
+        | Sunny -> "Sunny"
+        | Rainy -> "Rainy"
+        | Cloudy -> "Cloudy"
+
+module DemandSimulationRecord =
+
+    open Types
+
+    let ofDemandSimulationResult (d: DemandSimulationResult) =
+
+        {
+            Day = 
+                let (Day d) = d.Day
+                d
+            Temperature = 
+                let (Temperature t) = d.Temperature
+                t
+            Condition = 
+                match d.Condition with
+                | Sunny -> "Sunny"
+                | Cloudy -> "Cloudy"
+                | Rainy -> "Rainy"
+            Demand = 
+                let (Demand d) = d.Demand
+                d
+        }
+
+    let importFile (filePath: string) =
+        let engine = FileHelpers.FileHelperEngine<DemandSimulationRecord>()
+        engine.ReadFile filePath
+
+
+module DemandSimulationResult =
+
+    open Types
+
+    let create (day: Day) (temperature: Temperature) (condition: Condition) (demand: Demand) : DemandSimulationResult =
+        {
+            Day = day
+            Temperature = temperature
+            Condition = condition
+            Demand = demand
+        }
+
+    let ofDemandSimulationRecord (d: DemandSimulationRecord) : DemandSimulationResult =
+        {
+            Day = Day d.Day
+            Temperature = Temperature d.Temperature
+            Condition = Condition.ofString d.Condition
+            Demand = Demand d.Demand
+        }
+
+    let demand (d: DemandSimulationResult) =
+        d.Demand
+
+    let day (d: DemandSimulationResult) =
+        d.Day
+
+    let fromFile (DataFile filePath) =
+        DemandSimulationRecord.importFile filePath
+        |> Array.map ofDemandSimulationRecord
+
+
 module Sales =
 
     open Types
@@ -124,23 +207,6 @@ module DemandSimulation =
     open FileHelpers
     open Types
 
-    module DemandSimulationResult =
-
-        let create (Day day) (Temperature temperature) (condition: Condition) (Demand demand) =
-
-            {
-                Day = day
-                Temperature = temperature
-                Condition = 
-                    match condition with
-                    | Sunny -> "Sunny"
-                    | Cloudy -> "Cloudy"
-                    | Rainy -> "Rainy"
-                Demand = demand
-            }
-
-        let demand (d: DemandSimulationResult) =
-            d.Demand
 
     let private conditions = 
         [
@@ -192,8 +258,8 @@ module DemandSimulation =
     let generateDayDemand (rng: Random) (parameters: FoodParameters) (day: Day) =
         let temperature = Temperature (ContinuousUniform.Sample (rng, 60.0, 90.0) |> Math.Truncate)
         let condition = conditions.[DiscreteUniform.Sample (rng, 0, 2)]
-        let sales = demandModel parameters.ConditionOffsets parameters.TemperatureModel rng condition temperature
-        DemandSimulationResult.create day temperature condition sales
+        let demand = demandModel parameters.ConditionOffsets parameters.TemperatureModel rng condition temperature
+        DemandSimulationResult.create day temperature condition demand
 
 
     let generateForNDays 
@@ -211,7 +277,9 @@ module DemandSimulation =
 
         let stats =
             demandSimulations
-            |> Seq.map (DemandSimulationResult.demand >> float)
+            |> Seq.map (fun x -> 
+                let (Demand d) = x.Demand
+                float d)
             |> DescriptiveStatistics
 
         reportResults food stats |> ignore
@@ -337,7 +405,7 @@ let rng = System.Random(123)
 // Number of days for which to generate data
 let numberOfDays = 100
 // Where to save the data to
-let outputDirectory = "."
+let outputDirectory = "./PastSalesData"
 
 // Take the parameters for each Food, generate sample data
 // and save it to a .csv
@@ -356,7 +424,16 @@ Examples.predictExample salesModels
 
 let futureDataDirectory = "./FutureSales"
 let numberOfFutureDays = 30
-// Generate some sample data for the future
+// Generate some sample data for the future to compare the performance
+// of the different ordering methods
 let futureSalesData =
     foodModelParameterData
     |> Map.map (DemandSimulation.generateForNDays rng futureDataDirectory numberOfFutureDays)
+
+
+let foodDemandData =
+    futureSalesData
+    |> Map.map (fun food dataFile -> 
+        let d = DemandSimulationResult.fromFile dataFile
+        d |> Array.map (fun x -> x.)
+        )
