@@ -9,6 +9,28 @@ module Types =
     open FileHelpers
     open Microsoft.ML.Data
 
+    [<Measure>] type USD
+    [<Measure>] type cm
+    [<Measure>] type gm
+    [<Measure>] type serving
+
+    type Demand = Demand of int
+    type Sales = Sales of int
+    type Inventory = Inventory of int
+    type Revenue = Revenue of float
+        with
+            static member Zero = Revenue 0.0
+            static member (+) (Revenue a, Revenue b) = Revenue (a + b)
+    type RevenuePerItem = RevenuePerItem of float
+        with
+            static member (*) (Sales sales, RevenuePerItem revenuePerItem) =
+                (float sales) * revenuePerItem
+                |> Revenue
+
+            static member (*) (revenuePerItem: RevenuePerItem, sales: Sales) =
+                sales * revenuePerItem
+    type NthItem = NthItem of int
+    type DemandRate = DemandRate of float
     type Day = Day of int
     type Temperature = Temperature of float
     type ModelFile = ModelFile of string
@@ -32,18 +54,21 @@ module Types =
 
     [<CLIMutable>]
     [<DelimitedRecord(",")>]
-    type Output = {
+    type DemandSimulationResult = {
         Day : int
         Temperature : float
         Condition : string
-        Sales : float
+        Demand : Demand
     }
 
     [<CLIMutable>]
-    type SalesData = {
-        [<LoadColumn(1)>] Temperature : single
-        [<LoadColumn(2)>] Condition : string
-        [<LoadColumn(3); ColumnName("Label")>] Sales : single
+    type DemandData = {
+        [<LoadColumn(1)>] 
+        Temperature : single
+        [<LoadColumn(2)>]
+        Condition : string
+        [<LoadColumn(3); ColumnName("Label")>]
+        Demand : single
     }
     
     type TemperatureModel = {
@@ -63,12 +88,34 @@ module Types =
     }
 
     [<CLIMutable>]
-    type SalesPrediction = {
-      [<ColumnName("Score")>] Sales : single
+    type DemandPrediction = {
+      [<ColumnName("Score")>]
+      Demand : single
     }
 
+    type DayDemand = DayDemand of Map<Food, Demand>
+    type InventoryPlan = InventoryPlan of Map<Food, Inventory>
 
-module DataGeneration =
+
+module Sales =
+
+    open Types
+
+    let calculate (Demand demand) (Inventory inventory) =
+        System.Math.Min (demand, inventory) |> Sales
+
+
+module RevenueModel =
+
+    open Types
+
+    let evaluate (revenuePerItem: Map<Food, RevenuePerItem>) (sales: Map<Food, Sales>) =
+        sales
+        |> Map.toSeq
+        |> Seq.sumBy (fun (food, sales) -> sales * revenuePerItem.[food] )
+
+
+module DemandSimulation =
 
     open System
     open MathNet.Numerics.Distributions
@@ -77,11 +124,9 @@ module DataGeneration =
     open FileHelpers
     open Types
 
-    // let rng = Random(123)
+    module DemandSimulationResult =
 
-    module Output =
-
-        let create (Day day) (Temperature temperature) (condition: Condition) (sales: float) =
+        let create (Day day) (Temperature temperature) (condition: Condition) (demand) =
 
             {
                 Day = day
@@ -91,8 +136,12 @@ module DataGeneration =
                     | Sunny -> "Sunny"
                     | Cloudy -> "Cloudy"
                     | Rainy -> "Rainy"
-                Sales = sales
+                Demand = demand
             }
+
+        let demand (d: DemandSimulationResult) =
+            let (Demand d) = d.Demand
+            d
 
     let private conditions = 
         [
@@ -100,7 +149,6 @@ module DataGeneration =
             1, Cloudy
             2, Rainy
         ] |> Map
-
 
 
     let private demandModel 
@@ -114,44 +162,10 @@ module DataGeneration =
             temperatureModel.Intercept + 
             temperature * temperatureModel.Coefficient
         Poisson.Sample (rng, lambda)
-        |> float
+        |> Demand
 
 
-    let generate 
-        (rng: Random)
-        (numberOfDays: int)
-        (outputDirectory: string)
-        (parameters: FoodParameters)
-        (food: Food) =
-
-        let days =
-            seq {1 .. numberOfDays}
-            |> Seq.map (fun d -> 
-                let weather = 
-                    {| Day = Day d
-                       Temperature = Temperature (ContinuousUniform.Sample (rng, 60.0, 90.0) |> Math.Truncate)
-                       Condition = conditions.[DiscreteUniform.Sample (rng, 0, 2)]
-                    |} 
-                {| weather with 
-                    Sales = demandModel parameters.ConditionOffsets parameters.TemperatureModel rng weather.Condition weather.Temperature
-                |}
-              )
-
-        let outputData =
-            days
-            |> Seq.map (fun d -> Output.create d.Day d.Temperature d.Condition d.Sales)
-
-        let engine = FileHelperEngine<Output>()
-        engine.HeaderText <- engine.GetFileHeader()
-        let outputFile = outputDirectory + IO.Path.DirectorySeparatorChar.ToString() + "Data_" + food.ToString() + ".csv"
-        engine.WriteFile(outputFile, outputData)
-
-        let stats =
-            days
-            |> Seq.map (fun d -> d.Sales)
-            |> DescriptiveStatistics
-
-
+    let private reportResults (food: Food) (stats: DescriptiveStatistics) =
         let rule = Rule($"{food} Results")
         rule.Alignment <- Justify.Center
         AnsiConsole.Render(rule);
@@ -164,6 +178,44 @@ module DataGeneration =
         table.AddRow ([|$"%.2f{stats.Mean}"; $"%.2f{stats.Variance}"; $"%.2f{stats.StandardDeviation}"|]) |> ignore
 
         AnsiConsole.Render(table)
+
+
+    let private writeResults (outputDirectory: string) (food: Food) (outputData: seq<DemandSimulationResult>) =
+        System.IO.Directory.CreateDirectory outputDirectory |> ignore
+
+        let engine = FileHelperEngine<DemandSimulationResult>()
+        engine.HeaderText <- engine.GetFileHeader()
+        let outputFile = outputDirectory + IO.Path.DirectorySeparatorChar.ToString() + "Data_" + food.ToString() + ".csv"
+        engine.WriteFile(outputFile, outputData)
+        outputFile
+
+
+    let generateDayDemand (rng: Random) (parameters: FoodParameters) (day: Day) =
+        let temperature = Temperature (ContinuousUniform.Sample (rng, 60.0, 90.0) |> Math.Truncate)
+        let condition = conditions.[DiscreteUniform.Sample (rng, 0, 2)]
+        let sales = demandModel parameters.ConditionOffsets parameters.TemperatureModel rng condition temperature
+        DemandSimulationResult.create day temperature condition sales
+
+
+    let generateForNDays 
+        (rng: Random)
+        (outputDirectory: string)
+        (numberOfDays: int)
+        (food: Food)
+        (parameters: FoodParameters) =
+
+        let demandSimulations =
+            seq {1 .. numberOfDays}
+            |> Seq.map (Day >> generateDayDemand rng parameters)
+
+        let outputFile = writeResults outputDirectory food demandSimulations
+
+        let stats =
+            demandSimulations
+            |> Seq.map (DemandSimulationResult.demand >> float)
+            |> DescriptiveStatistics
+
+        reportResults food stats |> ignore
 
         DataFile outputFile
 
@@ -200,15 +252,14 @@ module Fitting =
         ModelFile outputFile
 
 
-    let train (inputFile) outputDir (food: Food) =
+    let train outputDir (food: Food) (inputFile) =
 
-        trainModel<SalesData> inputFile outputDir food
+        trainModel<DemandData> inputFile outputDir food
 
 
 module Prediction =
 
     open Microsoft.ML
-    open Microsoft.ML.Data
     open Types
 
 
@@ -216,7 +267,7 @@ module Prediction =
       
       let context = MLContext()
       let model, _ = context.Model.Load(modelFile)
-      let predictionEngine = context.Model.CreatePredictionEngine<WeatherInput, SalesPrediction>(model)
+      let predictionEngine = context.Model.CreatePredictionEngine<WeatherInput, DemandPrediction>(model)
       predictionEngine.Predict weatherObservation
 
 
@@ -228,8 +279,28 @@ module Prediction =
       salesPrediction
 
 
+module Examples =
+
+    open Types
+
+    let predictExample (salesModels: Map<Food, ModelFile>) =
+
+        let weatherSample : WeatherInput = {
+            Condition = "Cloudy"
+            Temperature = 80.0f
+        }
+
+        let salesPredictions =
+            salesModels
+            |> Map.map (fun food modelFile -> Prediction.predict modelFile weatherSample)
+
+        printfn "%A" salesPredictions
+
+
 open Types
 
+
+// Parameters for generating samples data
 let burgerModelData = {
     ConditionOffsets = [ Sunny, -30.0; Cloudy, 0.0; Rainy, 30.0 ] |> Map
     TemperatureModel = {
@@ -254,30 +325,39 @@ let tacoModelData = {
      }
 }
 
-let foodModelData = 
+// Map of parameter data for generation and training
+let foodModelParameterData = 
     [
         Burger, burgerModelData
         Pizza, pizzaModelData
         Taco, tacoModelData
     ] |> Map
 
-
+// Setting the random number seed to perform reliable re-runs
 let rng = System.Random(123)
+// Number of days for which to generate data
 let numberOfDays = 100
+// Where to save the data to
 let outputDirectory = "."
 
+// Take the parameters for each Food, generate sample data
+// and save it to a .csv
+let salesData =
+    foodModelParameterData
+    |> Map.map (DemandSimulation.generateForNDays rng outputDirectory numberOfDays)
+
+// Take the sales data for each Food and train a model
 let salesModels =
-    foodModelData
-    |> Map.map (fun food parameters -> DataGeneration.generate rng numberOfDays outputDirectory parameters food)
-    |> Map.map (fun food dataFile -> Fitting.train dataFile outputDirectory food)
+    salesData
+    |> Map.map (Fitting.train outputDirectory)
 
-let weatherSample : WeatherInput = {
-    Condition = "Cloudy"
-    Temperature = 80.0f
-}
 
-let salesPredictions =
-    salesModels
-    |> Map.map (fun food modelFile -> Prediction.predict modelFile weatherSample)
+// An example of scoring using a trained model
+Examples.predictExample salesModels
 
-printfn "%A" salesPredictions
+let futureDataDirectory = "./FutureSales"
+let numberOfFutureDays = 30
+// Generate some sample data for the future
+let futureSalesData =
+    foodModelParameterData
+    |> Map.map (DemandSimulation.generateForNDays rng futureDataDirectory numberOfFutureDays)
