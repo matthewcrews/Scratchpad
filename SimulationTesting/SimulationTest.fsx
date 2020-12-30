@@ -515,8 +515,8 @@ let rng = System.Random(123)
 let numberOfDays = 100
 // Where to save the data to
 let outputDirectory = OutputDirectory "./PastSalesData"
-let minTemp = Temperature 70.0
-let maxTemp = Temperature 90.0
+let minTemp = Temperature 40.0
+let maxTemp = Temperature 110.0
 let pastDays =
     [1..numberOfDays]
     |> List.map Day
