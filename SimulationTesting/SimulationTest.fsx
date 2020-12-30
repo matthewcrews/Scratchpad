@@ -41,6 +41,11 @@ module Types =
         | Cloudy
         | Rainy
 
+    type Weather = {
+        Condition : Condition
+        Temperature : Temperature
+    }
+
     type Food =
         | Burger
         | Pizza
@@ -198,7 +203,7 @@ module RevenueModel =
         |> Seq.sumBy (fun (food, sales) -> sales * revenuePerItem.[food] )
 
 
-module DemandSimulation =
+module Simulation =
 
     open System
     open MathNet.Numerics.Distributions
@@ -208,13 +213,39 @@ module DemandSimulation =
     open Types
 
 
-    let private conditions = 
-        [
-            0, Sunny
-            1, Cloudy
-            2, Rainy
-        ] |> Map
+    module Condition =
 
+        let private conditions = 
+            [
+                0, Sunny
+                1, Cloudy
+                2, Rainy
+            ] |> Map
+
+        let sample (rng: System.Random) =
+            conditions.[rng.Next(0, 2)]
+
+
+    module Temperature =
+
+        let sample (rng: Random) (Temperature minTemperature) (Temperature maxTemperature) =
+            rng.NextDouble() * (maxTemperature - minTemperature) + minTemperature
+            |> Temperature
+
+
+    module Weather =
+
+        let sample (rng: Random) (minTemperature: Temperature) (maxTemperature: Temperature) : Weather =
+            let condition = Condition.sample rng
+            let temperature = Temperature.sample rng minTemperature maxTemperature
+            {
+                Condition = condition
+                Temperature = temperature
+            }
+
+    module Demand =
+
+        let sample (rng: Random) (weather: Weather) (parameters: Parameters) =
 
     let private demandModel 
         (conditionOffsets: Map<Condition, float>) 
