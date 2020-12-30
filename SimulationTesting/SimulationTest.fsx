@@ -612,3 +612,44 @@ let optimizedPlanRevenue =
     |> List.sumBy (fun d -> RevenueModel.evaluate revenuePerServing optimizedPlan d.FoodDemand)
 
 
+let optimizerConfig = {
+    Revenue = 
+        Map [
+            Burger, 1.3<USD/serving>
+            Pizza,  1.6<USD/serving>
+            Taco,   1.4<USD/serving>
+        ]
+    Storage =
+        Map [
+            Burger, 700.0<cm^3/serving>
+            Pizza,  950.0<cm^3/serving>
+            Taco,   800.0<cm^3/serving>
+        ]
+    FridgeSpace =
+        Map [
+            Burger, 900.0<cm^3/serving>
+            Pizza,  940.0<cm^3/serving>
+            Taco,   850.0<cm^3/serving>
+        ]
+    Weight =
+        Map [
+            Burger, 550.0<gm/serving>
+            Pizza,  800.0<gm/serving>
+            Taco,   600.0<gm/serving>
+        ]
+    MaxWeight = 1_000_000.0<gm>
+    MaxStorage = 3_000_000.0<cm^3>
+    MaxFridgeSpace = 2_000_000.0<cm^3>
+    MaxItemCount = 1_000<serving>
+}
+
+let planOptimizer = PlanOptimizer.create optimizerConfig 
+
+let predictorPlusOptimizerRevenue =
+    futureDays
+    |> List.map (fun d -> {| d with DemandRates = Map [ Burger, burgerPredictor.predict d.Weather
+                                                        Pizza, pizzaPredictor.predict d.Weather
+                                                        Taco, tacoPredictor.predict d.Weather
+                                                      ] |})
+    |> List.map (fun d -> {| d with Plan = planOptimizer.plan d.DemandRates |})
+    |> List.sumBy (fun d -> RevenueModel.evaluate revenuePerServing d.Plan d.FoodDemand)
