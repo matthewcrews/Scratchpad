@@ -22,6 +22,10 @@ module Types =
         with
             static member Zero = Revenue 0.0<USD>
             static member (+) (Revenue a, Revenue b) = Revenue (a + b)
+            override x.ToString () =
+                let (Revenue r) = x
+                (float r).ToString("C")
+
     type RevenuePerServing = RevenuePerServing of float<USD/serving>
         with
             static member (*) (Sales sales, RevenuePerServing revenuePerServing) =
@@ -482,6 +486,7 @@ module Examples =
 
 
 open Types
+open Spectre.Console
 
 
 // Parameters for generating samples data
@@ -653,3 +658,12 @@ let predictorPlusOptimizerRevenue =
                                                       ] |})
     |> List.map (fun d -> {| d with Plan = planOptimizer.plan d.DemandRates |})
     |> List.sumBy (fun d -> RevenueModel.evaluate revenuePerServing d.Plan d.FoodDemand)
+
+
+let table = Table()
+table.AddColumn("Simple Heuristic")
+table.AddColumn("Optimizaiton")
+table.AddColumn("Optimizaiton + Prediction")
+
+table.AddRow( $"%O{simpleHeuristicRevenue}", $"%O{optimizedPlanRevenue}", $"%O{predictorPlusOptimizerRevenue}")
+AnsiConsole.Render(table)
