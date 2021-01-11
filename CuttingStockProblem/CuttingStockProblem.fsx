@@ -5,44 +5,38 @@ type Plan = Plan of Map<Cut, int>
 
 module Cut =
 
+    /// Take a Cut and return the length as a float
     let length (Cut length) =
         length
 
 module Plan =
 
+    /// Give me a Plan with no cuts
     let empty : Plan =
         Plan Map.empty
 
+    /// Give me the total length of cuts in the plan
     let length (Plan plan) =
        plan
        |> Seq.sumBy (fun (KeyValue(Cut cut, count)) -> cut * float count)
 
-    let ofCuts (cuts: Cut list) =
-        cuts
-        |> List.groupBy id
-        |> List.map (fun (cut, grp) -> cut, List.length grp)
-        |> Map
-        |> Plan
-
-    let ofCut (cut: Cut) =
-        Map [cut, 1]
-        |> Plan
-
+    /// Add a Cut to a Plan and return a new Plan
     let addCut (cut: Cut) (Plan plan) =
         match Map.tryFind cut plan with
         | Some count -> Plan (Map.add cut (count + 1) plan)
         | None -> Plan (Map.add cut 1 plan)
 
-    // let cutCount (Plan plan) =
-
+    /// Give me the count of each distinct cut in a given Plan
+    let cutCounts (Plan plan) =
+        plan
+        |> Seq.map (fun (KeyValue(cut, count)) -> cut, count)
         
 
-let generatePlans (minLength: float) (maxLength: float) (cuts: Cut list) =
+let generatePlans (stockLength: float) (cuts: Cut list) : Plan list =
     let sortedCuts = 
         cuts 
         |> List.distinct
         |> List.sortBy (fun (Cut length) -> length)
-    let initialCandidate = Plan.empty, sortedCuts
 
     let rec generate (candidates: (Plan * Cut list) list) (approved: Plan list) =
         match candidates with
@@ -50,29 +44,24 @@ let generatePlans (minLength: float) (maxLength: float) (cuts: Cut list) =
         | testCandidate::remainingCandidates ->
             let plan, cuts = testCandidate
             match cuts with
-            | [] ->
-                if Plan.length plan >= minLength then
-                    generate remainingCandidates ([plan] @ approved)
-                else
-                    generate remainingCandidates approved
+            | [] -> 
+                let newApproved = plan::approved
+                generate remainingCandidates newApproved
             | nextCut::remainingCuts ->
-                if Plan.length plan + Cut.length nextCut <= maxLength then
+                if Plan.length plan + Cut.length nextCut <= stockLength then
                     let newPlan = Plan.addCut nextCut plan
-                    generate ([(newPlan, cuts); (plan, remainingCuts)] @ remainingCandidates) approved
+                    let newCandidates = (newPlan, cuts)::(plan, remainingCuts)::remainingCandidates
+                    generate newCandidates approved
                 else
-                    if Plan.length plan >= minLength then
-                        generate remainingCandidates ([plan] @ approved)
-                    else
-                        generate remainingCandidates approved
+                    let newApproved = plan::approved
+                    generate remainingCandidates newApproved
 
+    let initialCandidate = Plan.empty, sortedCuts
     generate [initialCandidate] []
 
-// let cuts =
-//     [1.0 .. 3.0]
-//     |> List.map Cut
 
 // let plans = generatePlans 2.0 3.0 cuts
-
+fsi.ShowDeclarationValues <- false
 let cuts = 
     [
         1380.0
@@ -108,22 +97,13 @@ let cutRequirements =
     ] |> Map
 
 
-let maxLength = 5600.0
-let minLength =
-    let (Cut minCut) = List.min cuts
-    maxLength - minCut
-
-let plans = generatePlans minLength maxLength cuts
-let planCount = List.length plans
+let stockLength = 5600.0
+let plans = generatePlans stockLength cuts
+List.length plans
 
 open Flips
 open Flips.Types
 open Flips.SliceMap
-
-// let planLengths =
-//     plans
-//     |> List.map (fun plan -> plan, Plan.length plan)
-//     |> SMap
 
 let planDecs =
     DecisionBuilder "PlanCount" {
@@ -133,11 +113,8 @@ let planDecs =
 
 let planCutCounts =
     plans
-    |> List.collect (fun plan ->
-                                let (Plan values) = plan
-                                let cutCounts = values |> Map.toList
-                                cutCounts 
-                                |> List.map (fun (cut, count) -> (plan, cut), float count)
+    |> Seq.collect (fun plan -> Plan.cutCounts plan
+                                |> Seq.map (fun (cut, count) -> (plan, cut), float count)
     ) |> SMap2
 
 let cutRequirementConstraints =
@@ -146,7 +123,7 @@ let cutRequirementConstraints =
         sum (planDecs .* planCutCounts.[All, cut]) >== cutRequirements.[cut]
     }
 
-let objective = Objective.create "MinCuts" Minimize (sum planDecs)
+let objective = Objective.create "MinRolls" Minimize (sum planDecs)
 
 let model =
     Model.create objective
@@ -154,3 +131,22 @@ let model =
 
 let result = Solver.solve Settings.basic model
 
+match result with
+| Optimal solution ->
+    let values = 
+        Solution.getValues solution planDecs
+        |> Map.filter (fun plan quantity -> quantity > 0.0)
+
+    let totalNumberOfCuts =
+        values
+        |> Seq.sumBy (fun (KeyValue(_, count)) -> count)
+
+    printfn "Quantity | Plan"
+    for KeyValue(plan, quantity) in values do
+        printfn $"{quantity} | {plan}"
+
+    printfn "=========================================="
+    printfn $"Total Number of Cuts: {totalNumberOfCuts}"
+    printfn "=========================================="
+
+| _ -> failwith "Unable to solve"
