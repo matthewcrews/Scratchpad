@@ -1,8 +1,8 @@
 {
   "ExpandedNodes": [
     "",
-    "\\SimulationTesting"
+    "\\CuttingStockProblem"
   ],
-  "SelectedNode": "\\SimulationTesting\\SimulationTest.fsx",
+  "SelectedNode": "\\CuttingStockProblem\\CuttingStockProblem.fsx",
   "PreviewInSolutionExplorer": false
 }
