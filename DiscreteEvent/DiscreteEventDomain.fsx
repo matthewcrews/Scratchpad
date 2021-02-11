@@ -241,8 +241,8 @@ Steps for simulation
 
 *)
 
-let initialize (model: Model) (simulationDuration: float) : ModelState * EventQueue =
-    let modelState = Simulation.ModelState.create model
+let initialize (simulationDuration: float) (model: Model) : ModelState * EventQueue =
+    let modelState = ModelState.create model
     let eventQueue = SortedSet<Simulation.Event>()
 
     let rec addEvents (lastTime: float) (maxTime: float) (modelState: ModelState, queue: SortedSet<Simulation.Event>) (generator: Generator) =
@@ -264,3 +264,8 @@ let initialize (model: Model) (simulationDuration: float) : ModelState * EventQu
         ||> Seq.fold (addEvents 0.0 simulationDuration)
 
     modelState, EventQueue queue
+
+let state, eventQueue = initialize 10.0 model
+let (EventQueue queue) = eventQueue
+for e in queue do
+    printfn $"{e}"
