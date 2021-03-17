@@ -265,7 +265,15 @@ let initialize (simulationDuration: float) (model: Model) : ModelState * EventQu
 
     modelState, EventQueue queue
 
-let state, eventQueue = initialize 10.0 model
+let modelState, eventQueue = initialize 10.0 model
 let (EventQueue queue) = eventQueue
 for e in queue do
     printfn $"{e}"
+
+
+let processEvent (model: Model) (state: ModelState) (event: Event) : (ModelState * Set<Event>) =
+
+    match event with
+    | Entered (job, queue) -> ()
+    | Completed (job, operation) -> ()
+
