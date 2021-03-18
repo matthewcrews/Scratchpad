@@ -1,7 +1,7 @@
 module rec Domain =
 
     type Resource = Resource of string
-    type AllocationTag = AllocationTag of string
+    type AllocationId = AllocationId of int64
     type AllocationRequestId = AllocationRequestId of int64
     type Location = Location of string
     type ItemId = ItemId of int64
@@ -54,26 +54,26 @@ module rec Domain =
         LastEventId : EventId
         LastStateId : StateId
         LastPlanId : PlanId
-        LastAllocationRequestId : AllocationRequestId
+        LastAllocationId : AllocationId
         Now : TimeStamp
         ItemLocations : Map<ItemId, Location>
         Locations : Map<Location, Set<ItemId>>
         Capacities : Map<Resource, Capacity>
         Availabilities : Map<Resource, Availability>
         Flows : Map<Flow, FlowState>
-        Allocations : Map<(PlanId * AllocationTag), Map<Resource, Allocation>>
+        Allocations : Map<AllocationId, Map<Resource, Allocation>>
     }
 
     type Step =
-        | Allocate of planId:PlanId * allocationTag: AllocationTag * resources: ResourceRequest list
-        | Free of planId:PlanId * allocationTag: AllocationTag
+        | Allocate of allocationId: AllocationId * resources: ResourceRequest list
+        | Free of allocationId: AllocationId
         | Move of item: ItemId * location: Location
         | Delay of duration: float
         | Open of flow: Flow * flowDescription: FlowDescription
         | Close of flow: Flow
 
     type AllocationRequest = {
-        AllocationRequestId : AllocationRequestId
+        AllocationId : AllocationId
         Resources : ResourceRequest list
         RemainingSteps : Step list
     }
@@ -96,37 +96,80 @@ module rec Domain =
             let newState = { state with LastPlanId = nextPlanId }
             nextPlanId, newState
 
+        // member _.Yield ((state: ModelState, plan: Plan)) = 
+        //     state, plan
+
+        member _.Bind (m, f) = f m
+
         member _.Yield _ = newState, { PlanId = planId; Steps = [] }
-        member _.Run (state: ModelState, steps: Step list) = state, { PlanId = planId; Steps = List.rev steps }
 
-        [<CustomOperation("allocate")>]
-        member _.Allocate ((state: ModelState, steps: Step list), allocationTag: string, resourceRequest: ResourceRequest list) =
-            let (AllocationRequestId requestId) = state.LastAllocationRequestId
-            let nextAllocationRequestId = AllocationRequestId (requestId + 1L)
-            let allocationTag = AllocationTag allocationTag
-            let newState = { state with LastAllocationRequestId = nextAllocationRequestId }
-            let allocationRequestStep = Step.Allocate (planId, allocationTag, resourceRequest)
-            newState, allocationRequestStep::steps
+        member _.Run (state: ModelState, plan: Plan) = 
+            state, { PlanId = planId; Steps = List.rev plan.Steps }
 
-        [<CustomOperation("free")>]
-        member _.Allocate ((state: ModelState, steps: Step list), allocationTag: string) =
-            let allocationTag = AllocationTag allocationTag
-            let freeStep = Step.Free (planId, allocationTag)
-            state, freeStep::steps
+        // [<CustomOperation("allocate")>]
+        // member _.Allocate ((state: ModelState, plan: Plan), resourceRequest: ResourceRequest list) =
+        //     let (AllocationId requestId) = state.LastAllocationId
+        //     let nextAllocationId = AllocationId (requestId + 1L)
+        //     let newState = { state with LastAllocationId = nextAllocationId }
+        //     let newStep = Step.Allocate (nextAllocationId, resourceRequest)
+        //     (newState, { plan with Steps = newStep::plan.Steps }), nextAllocationId
 
-        [<CustomOperation("delay")>]
-         member _.Delay ((state: ModelState, steps: Step list), duration: float) =
+        // [<CustomOperation("free")>]
+        // member _.Allocate ((state: ModelState, steps: Step list), allocationId: AllocationId) =
+        //     let freeStep = Step.Free (allocationId)
+        //     state, freeStep::steps
+
+        [<CustomOperation("pause")>]
+         member _.Pause ((state: ModelState, plan: Plan), (duration: float)) =
             let delayStep = Step.Delay duration
-            state, delayStep::steps
+            // state, delayStep::steps
+            (newState, { plan with Steps = delayStep::plan.Steps })
 
-        [<CustomOperation("open")>]
-         member _.Open ((state: ModelState, steps: Step list), flow: Flow, flowDescription: FlowDescription) =
-            let openStep = Step.Open (flow, flowDescription)
-            state, openStep::steps
+        // [<CustomOperation("open")>]
+        //  member _.Open ((state: ModelState, steps: Step list), flow: Flow, flowDescription: FlowDescription) =
+        //     let openStep = Step.Open (flow, flowDescription)
+        //     state, openStep::steps
 
-        [<CustomOperation("close")>]
-         member _.Close ((state: ModelState, steps: Step list), flow: Flow) =
-            let closeStep = Step.Close flow
-            state, closeStep::steps
+        // [<CustomOperation("close")>]
+        //  member _.Close ((state: ModelState, steps: Step list), flow: Flow) =
+        //     let closeStep = Step.Close flow
+        //     state, closeStep::steps
+
+        // member _.Delay(f) =
+        //     fun (state: ModelState) -> f state
+
+    // let plan = PlanBuilder
+
+open Domain
+
+let initialState = {
+    LastEventId = EventId 0L
+    LastStateId = StateId 0L
+    LastPlanId = PlanId 0L
+    LastAllocationId = AllocationId 0L
+    Now = TimeStamp 0.0
+    ItemLocations = Map []
+    Locations = Map []
+    Capacities = Map []
+    Availabilities = Map []
+    Flows = Map []
+    Allocations = Map []
+}
+
+let allocate (resourceRequest: ResourceRequest list) =
+    fun (state: ModelState, plan: Plan) ->
+        let (AllocationId requestId) = state.LastAllocationId
+        let nextAllocationId = AllocationId (requestId + 1L)
+        let newState = { state with LastAllocationId = nextAllocationId }
+        let newStep = Step.Allocate (nextAllocationId, resourceRequest)
+        (newState, { plan with Steps = newStep::plan.Steps }), nextAllocationId
+
+
+let newState, plan =
+    PlanBuilder initialState {
+        let! allocationId = allocate []
+        pause 10.0
+        pause 1.0
+    }
 
         
