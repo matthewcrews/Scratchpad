@@ -1,5 +1,3 @@
-type State = State of System.Random
-
 type Food =
     | Chicken
     | Rice
@@ -12,16 +10,11 @@ type Step =
 type Plan = Plan of Step list
 
 type PlanBuilder () =
-    // member this.Return x = x
-    member this.Yield _ = Plan []
-    // member this.Bind (x, f) = f::x
-    member this.Run (Plan x) = Plan (List.rev x)
-    // member this.Zero (x) = []
 
-    [<CustomOperation("getFood")>]
-    member this.GetFood (Plan p, food) =
-        printfn "GetFood"
-        Plan ((GetFood food)::p)
+    member this.Bind (plan:Plan, f) =
+        f plan
+    member this.Yield _ = Plan []
+    member this.Run (Plan x) = Plan (List.rev x)
 
     [<CustomOperation("eat")>]
     member this.Eat (Plan p, food) =
@@ -38,9 +31,28 @@ let plan = PlanBuilder()
 let rng = System.Random(123)
 
 
+let getFood (Plan p) =
+    printfn "GetFood"
+    let randomFood = 
+        if rng.NextDouble() > 0.5 then
+            Food.Chicken
+        else
+            Food.Rice
+    (Plan ((GetFood randomFood)::p)), Food.Chicken
+
 let testPlan =
     plan {
-        getFood Chicken
+        let! food = getFood
         sleep 10
-        eat Rice
+        eat food
     }
+
+(*
+Example result
+testPlan =
+    (GetFood Chicken,(
+        (Sleep 10,(
+            EatFood Chicken
+        ))
+    ))
+*)
