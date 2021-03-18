@@ -2,8 +2,12 @@ type Food =
     | Chicken
     | Rice
 
+type Tool =
+  | Shovel
+
 type Step =
   | GetFood of Food
+  | GetTool of Tool
   | Eat of Food
   | Sleep of duration:int
 
@@ -17,6 +21,10 @@ let getFood () =
     if rng.NextDouble() > 0.5 then Food.Chicken
     else Food.Rice
   Plan ([GetFood randomFood], randomFood)
+
+let getTool ()  =
+  let tool = Shovel
+  Plan ([GetTool tool], tool)
 
 type PlanBuilder () =
 
@@ -34,13 +42,13 @@ type PlanBuilder () =
         printfn "Yield"
         Plan ([], x)
 
-    member this.Return x = 
-        printfn "Retrun"
-        Plan ([], x)
+    // member this.Return x = 
+    //     printfn "Retrun"
+    //     Plan ([], x)
 
     member this.Run (Plan(p,r)) = 
         printfn "Run"
-        Plan (List.rev p, r)
+        List.rev p
 
     [<CustomOperation("eat", MaintainsVariableSpace=true)>]
     member this.Eat (Plan(p, r), [<ProjectionParameter>] food) =
@@ -54,9 +62,10 @@ type PlanBuilder () =
 
 let plan = PlanBuilder()
 
-let (Plan (testPlan, _)) =
+let testPlan =
   plan {
       let! food = getFood ()
+      let! tool = getTool ()
       printfn $"Food1: {food}"
       sleep 1
       let! food2 = getFood ()
@@ -65,7 +74,14 @@ let (Plan (testPlan, _)) =
       eat food2
       sleep 5
       eat food
-      return ()
+      // return ()
   }
 
 testPlan
+
+let simplePlan =
+  plan {
+    let! food = getFood ()
+    sleep 10
+    eat food
+  }
