@@ -16,34 +16,37 @@ type PlanAccumulator<'T> = PlanAccumulator of State * Step list * 'T
 
 let rng = System.Random(123)
 
-let getFood (state: State) =
+let getFood (PlanAccumulator (s, p, r)) =
   printfn "GetFood"
   let randomFood = 
     if rng.NextDouble() > 0.5 then Food.Chicken
     else Food.Rice
-  let (StepId lastStepId) = state.LastStepId
+  let (StepId lastStepId) = s.LastStepId
   let nextStepId = StepId (lastStepId + 1)
-  let newState = { state with LastStepId = nextStepId }
+  let newState = { s with LastStepId = nextStepId }
   let newStep = GetFood (nextStepId, randomFood)
-  PlanAccumulator (newState, [newStep], randomFood)
+  PlanAccumulator (newState, newStep::p, randomFood)
 
 type PlanBuilder (state: State) =
+
+    let mutable Currnet = PlanAccumulator (state, [], _)
 
     member this.For (PlanAccumulator (state, steps1, res):PlanAccumulator<'T>, f:'T -> PlanAccumulator<'R>) : PlanAccumulator<'R> =
       printfn "For"
       let (PlanAccumulator(state2, steps2, res2)) = f res
       PlanAccumulator (state2, steps2 @ steps1, res2)
 
-    member this.Bind (PlanAccumulator (state1, steps1, res):PlanAccumulator<'T>, f:State -> 'T -> PlanAccumulator<'R>) : PlanAccumulator<'R> =
+    member this.Bind (input:PlanAccumulator<'a> -> PlanAccumulator<'T>, f:'T -> PlanAccumulator<'R>) : PlanAccumulator<'R> =
         printfn "Bind"
-        let (PlanAccumulator(state2, steps2, res2)) = f state1 res
+        let PlanAccumulator (state1, steps1, res) = input Currnet // How do I get the current PlanAccumulator?
+        let (PlanAccumulator(state2, steps2, res2)) = f (state1 res)
         PlanAccumulator (state2, steps2 @ steps1, res2)
 
     member this.Yield x = 
         printfn "Yield"
         PlanAccumulator (state, [], x)
 
-    member this.Run (PlanAccumulator (s, p,r)) = 
+    member this.Run (PlanAccumulator (s, p, r)) = 
         printfn "Run"
         s, List.rev p
 
@@ -73,16 +76,20 @@ let initialState = {
 let newState, testPlan =
   PlanBuilder initialState {
       let! food = getFood
-      // printfn $"Food1: {food}"
-      sleep 1
-      // let! food2 = getFood
-      // printfn $"Food2: {food2}"
-      sleep 10
-      eat Rice
       sleep 5
       eat Chicken
   }
 
 newState
 testPlan
+
+(*
+Example Result
+val testPlan =
+    [
+        (StepId 1, Food Chicken)
+        (StepId 2, Sleep 1)
+        (StepId 3, Eat Chicken)
+    ]
+*)
 

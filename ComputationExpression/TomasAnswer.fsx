@@ -42,10 +42,6 @@ type PlanBuilder () =
         printfn "Yield"
         Plan ([], x)
 
-    // member this.Return x = 
-    //     printfn "Retrun"
-    //     Plan ([], x)
-
     member this.Run (Plan(p,r)) = 
         printfn "Run"
         List.rev p
