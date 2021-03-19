@@ -117,11 +117,18 @@ let simplePlan =
         sleep 1
         eat f1
         sleep 2
+        let! f3 = getFood
         eat f1
+        let! f2 = getFood
         sleep 3
+        sleep 5
+        eat f2
+        eat f3
     }
 
 let initalAcc = PlanAcc(StepId 0, [])
 
 let x = State.exec simplePlan initalAcc
-x
+let (PlanAcc (resultStepId, resultPlan)) = x
+printfn $"Latest StepId: {resultStepId}"
+printfn $"The plan: {resultPlan}"
