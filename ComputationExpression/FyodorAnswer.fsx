@@ -82,36 +82,33 @@ type StateBuilder with
     [<CustomOperation("sleep", MaintainsVariableSpaceUsingBind=true)>]
     member this.Sleep (st:State<_,PlanAcc>, [<ProjectionParameter>] (duration: 'a -> int)) =
         printfn $"Sleep"
-        let program d =
-            state {
-                // let! x = st
-                printfn "Sleep: %A" duration
-                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
-                let nextStepId = StepId (lastStepId + 1)
-                let newStep = Sleep (nextStepId, d)
-                let newAcc = PlanAcc (nextStepId, newStep::steps)
-                do! State.setState newAcc
-                // return x 
-            }
-
-        State.bind (fun x -> program (duration x)) st
+        state {
+            let! x = st
+            let d = duration x
+            printfn "Sleep: %A" duration
+            let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+            let nextStepId = StepId (lastStepId + 1)
+            let newStep = Sleep (nextStepId, d)
+            let newAcc = PlanAcc (nextStepId, newStep::steps)
+            do! State.setState newAcc
+            return x 
+        }
 
 
     [<CustomOperation("eat", MaintainsVariableSpaceUsingBind=true)>]
     member this.Eat (st:State<_,PlanAcc>, [<ProjectionParameter>] (food: 'a -> Food)) =
         printfn $"Eat"
-        let program e =
-            state {
-                // let! x = st
-                printfn "Eat: %A" food
-                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
-                let nextStepId = StepId (lastStepId + 1)
-                let newStep = Eat (nextStepId, e)
-                let newAcc = PlanAcc (nextStepId, newStep::steps)
-                do! State.setState newAcc
-                // return x
-            }
-        State.bind (fun x -> program (food x)) st
+        state {
+            let! x = st
+            let f = food x
+            printfn "Eat: %A" food
+            let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+            let nextStepId = StepId (lastStepId + 1)
+            let newStep = Eat (nextStepId, f)
+            let newAcc = PlanAcc (nextStepId, newStep::steps)
+            do! State.setState newAcc
+            return x
+        }
 
 
 let simplePlan =
