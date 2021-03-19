@@ -52,13 +52,6 @@ type StateBuilder() =
     member __.Delay(f) = 
         State.bind f (State.result ())
 
-// let c : State<unit, string> =
-//     state {
-//         if true then
-//             printfn "Hello"
-//     }
-
-// let x = State.eval c ""
 let rng = System.Random(123)
 type StepId = StepId of int
 type Food =
@@ -69,11 +62,6 @@ type Step =
   | Eat of StepId * Food
   | Sleep of StepId * duration:int
 type PlanAcc = PlanAcc of lastStepId:StepId * steps:Step list
-
-// type StateBuilder with
-    // member __.Run x = x
-    // member __.Run (PlanAcc (lastStepId, steps)) =
-    //     lastStepId, steps
 
 let state = StateBuilder()
 
@@ -91,9 +79,9 @@ let getFood =
         return randomFood
     }
 
-let sleep duration = 
+let sleepProgram duration = 
     state {
-        printfn "Sleep: %A" duration
+        // printfn "Sleep: %A" duration
         let! (PlanAcc (StepId lastStepId, steps)) = State.getState
         let nextStepId = StepId (lastStepId + 1)
         let newStep = Sleep (nextStepId, duration)
@@ -101,11 +89,21 @@ let sleep duration =
         do! State.setState newAcc
     }
 
+type StateBuilder with
+
+    member __.Yield x = x
+
+    [<CustomOperation("sleep", MaintainsVariableSpaceUsingBind=true)>]
+    member this.Sleep (state:State<_,PlanAcc>, duration) =
+        printfn $"Sleep"
+        State.bind (fun _ -> sleepProgram duration) state
+
 
 let simplePlan =
     state {
         let! food = getFood
-        do! sleep 10
+        sleep 10
+        sleep 2
     }
 
 let initalAcc = PlanAcc(StepId 0, [])
