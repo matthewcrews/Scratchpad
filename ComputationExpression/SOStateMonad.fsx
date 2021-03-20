@@ -1,17 +1,14 @@
 type State<'s, 'a> = State of ('s -> ('a * 's))
 
 module State =
-    let inline run state x = let (State(f)) = x in f state
+    let inline run state x =
+        let (State f) = x // Getting the function out of the state
+        f state
     let get = State(fun s -> s, s)
     let put newState = State(fun _ -> (), newState)
     let map f s = State(fun (state: 's) ->
         let x, state = run state s
         f x, state)
-
-    let bind x f : State<'s, 'b> =
-        State(fun state ->
-            let (result: 'a), state = run state x
-            run state (f result))
 
 /// The state monad passes around an explicit internal state that can be
 /// updated along the way. It enables the appearance of mutability in a purely
@@ -22,7 +19,10 @@ type StateBuilder() =
     member this.Zero () = State(fun s -> (), s)
     member this.Return x = State(fun s -> x, s)
     member inline this.ReturnFrom (x: State<'s, 'a>) = x
-    member this.Bind (x, f) : State<'s, 'b> = State.bind x f
+    member this.Bind (x, f) : State<'s, 'b> =
+        State(fun state ->
+            let (result: 'a), state = State.run state x
+            State.run state (f result))
     member this.Combine (x1: State<'s, 'a>, x2: State<'s, 'b>) =
         State(fun state ->
             let result, state = State.run state x1
@@ -55,29 +55,6 @@ type Step =
 
 type PlanAccumulator = PlanAccumulator of PlanState * Step list
 
-type StateBuilder with
-
-    [<CustomOperation("sleep", MaintainsVariableSpaceUsingBind=true)>]
-    member this.Sleep (state: State<PlanAccumulator, _>, [<ProjectionParameter>] duration) =
-        printfn $"Sleep: {duration}"
-        let t =
-            State.get
-            |> State.map state
-        let (StepId lastStepId) = s.LastStepId
-        let nextStepId = StepId (lastStepId + 1)
-        let newState = { s with LastStepId = nextStepId }
-        let newStep = Sleep (nextStepId, (duration r))
-        PlanAccumulator (newState, newStep::p, r)
-        // state {
-        //     printfn "Sleep: %A" duration
-        //     let! (PlanAccumulator (planState, steps)) = State.get
-        //     let (StepId lastStepId) = planState.LastStepId
-        //     let nextStepId = StepId (lastStepId + 1)
-        //     let newState = { planState with LastStepId = nextStepId }
-        //     let newStep = Sleep (nextStepId, duration)
-        //     do! State.put (PlanAccumulator (newState, newStep :: steps))
-        // }
-
 let rng = System.Random(123)
 
 let getFood =
@@ -106,16 +83,16 @@ let eat food =
         do! State.put (PlanAccumulator (newState, newStep :: steps))
     }
 
-// let sleep duration =
-//     state {
-//         printfn "Sleep: %A" duration
-//         let! (PlanAccumulator (planState, steps)) = State.get
-//         let (StepId lastStepId) = planState.LastStepId
-//         let nextStepId = StepId (lastStepId + 1)
-//         let newState = { planState with LastStepId = nextStepId }
-//         let newStep = Sleep (nextStepId, duration)
-//         do! State.put (PlanAccumulator (newState, newStep :: steps))
-//     }
+let sleep duration =
+    state {
+        printfn "Sleep: %A" duration
+        let! (PlanAccumulator (planState, steps)) = State.get
+        let (StepId lastStepId) = planState.LastStepId
+        let nextStepId = StepId (lastStepId + 1)
+        let newState = { planState with LastStepId = nextStepId }
+        let newStep = Sleep (nextStepId, duration)
+        do! State.put (PlanAccumulator (newState, newStep :: steps))
+    }
 
 let initialState = {
     LastStepId = StepId 0
@@ -124,12 +101,19 @@ let initialState = {
 let initialPlan =
     PlanAccumulator (initialState, List.empty)
 
+let t = 
+    state {
+        let! food = getFood
+        do! sleep 10
+        do! eat food
+    }
 
 let _, testPlan =
     state {
         let! food = getFood
-        sleep 10
+        do! sleep 10
         do! eat food
     } |> State.run initialPlan
 
 printfn "%A" testPlan
+
