@@ -110,6 +110,23 @@ type StateBuilder with
             return x
         }
 
+    [<CustomOperation("eatTwice", MaintainsVariableSpaceUsingBind=true)>]
+    member this.EatTwice (st:State<_,PlanAcc>, [<ProjectionParameter>] (food: 'a -> Food), [<ProjectionParameter>] food2) =
+        printfn $"Eat"
+        state {
+            let! x = st
+            let f = food x
+            let f2 = food2 x
+            printfn "Eat: %A" food
+            let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+            let nextStepId = StepId (lastStepId + 1)
+            let newStep = Eat (nextStepId, f)
+            let nextStep = Eat(nextStepId, f2)
+            let newAcc = PlanAcc (nextStepId, nextStep::newStep::steps)
+            do! State.setState newAcc
+            return x
+        }
+
 
 let simplePlan =
     state {
@@ -124,6 +141,7 @@ let simplePlan =
         sleep 5
         eat f2
         eat f3
+        eatTwice f2 f3
     }
 
 let initalAcc = PlanAcc(StepId 0, [])

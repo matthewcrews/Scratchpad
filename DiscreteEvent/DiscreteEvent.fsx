@@ -1,54 +1,114 @@
-module rec Domain =
+module Domain =
 
-    type Resource = Resource of string
-    type AllocationId = AllocationId of int64
-    type AllocationRequestId = AllocationRequestId of int64
-    type Location = Location of string
-    type ItemId = ItemId of int64
-    type Item<'a> = {
-        ItemId : ItemId
-        Type : 'a
-    }
-    type PlanId = PlanId of int64
-    type StepId = StepId of int64
-    type Vessel = Vessel of string
-    type Flow = Flow of string
-    type FlowRate = FlowRate of float
-    type FlowComponent = FlowComponent of percent:float * element:string
-    type FlowComposition = FlowComposition of FlowComponent list
-    type FlowDescription = {
-        FlowRate : FlowRate
-        FlowComposition : FlowComposition
-    }
-    type EventId = EventId of int64
+    
     type StateId = StateId of int64
     type TimeStamp = TimeStamp of float
 
-    type FlowState =
-        | Closed
-        | Open of FlowDescription
+    type ResourceName = ResourceName of string
+    type ResourceId = ResourceId of int64
+    type Resource = Resource of resourceName:ResourceName * resourceId:ResourceId
 
-    type Availability =
-        | Nothing
-        | One
-        | Discrete of max:int
-        | Continuous of max:float
+    type AllocationId = AllocationId of int64
+    type Allocation = {
+        AllocationId : AllocationId
+        Resources : Set<Resource>
+    }
 
-    type Capacity =
-        | Singleton
-        | Discrete of max:int
-        | Continuous of max:float
+    type StepType =
+        | Allocate of allocationId: AllocationId * resources: ResourceRequest list
+        | Free of allocationId: AllocationId
+        | Move of item: ItemId * location: Location
+        | Delay of duration: float
+        // | Open of flow: Flow * flowDescription: FlowDescription
+        // | Close of flow: Flow
 
-    type ResourceRequest =
-        | This of resource: Resource
-        | OneOf of resources: Set<Resource>
-        | FewOf of resource: Resource * quantity:int
-        | SomeOf of resource: Resource * quantity:float
+    type StepId = StepId of int64
+    type Step = stepId:StepId * stepType:StepType
 
-    type Allocation =
-        | All
-        | Discrete of quantity:int
-        | Continuous of quantity:float
+    type PlanId = PlanId of int64
+    type Plan = {
+        PlanId : PlanId
+        Steps : Step list
+    }
+    type PlanState = {
+        Processed : Step list
+        Pending : Step list
+        Current : Step * Event
+
+    }
+
+
+    type LocationId = LocationId of int64
+    type LocationName = LocationName of string
+    type Location = Location of locationId:LocationId * locationName:LocationName
+    // type ItemId = ItemId of int64
+    // type Item<'a> = {
+    //     ItemId : ItemId
+    //     Type : 'a
+    // }
+
+
+
+    // type Vessel = Vessel of string
+    // type VesselId = VesselId of int64
+    // type Flow = Flow of string
+    // type FlowId = FlowId of int64
+    // type FlowRate = FlowRate of float
+    // type FlowComponent = FlowComponent of percent:float * element:string
+    // type FlowComposition = FlowComposition of FlowComponent list
+    // type FlowDescription = {
+    //     FlowRate : FlowRate
+    //     FlowComposition : FlowComposition
+    // }
+    // type FlowState =
+    //     | Closed
+    //     | Open of FlowDescription
+
+    type PossibilityId = PossibilityId of int64
+    type PossibilityType = 
+        | Allocate of planId:PlanId * allocationId:AllocationId
+        | Free of planId:PlanId * allocationId:AllocationId
+        | Delay
+
+    type Possibility =
+        {
+            PossibilityId : PossibilityId
+            TimeStamp : TimeStamp
+            PossibilityType : PossibilityType
+            PlanId : PlanId
+
+        }
+
+
+
+
+
+
+    // type Availability =
+    //     | Nothing
+    //     | One
+    //     | Discrete of max:int
+    //     | Continuous of max:float
+
+    // type Capacity =
+    //     | Singleton
+    //     | Discrete of max:int
+    //     | Continuous of max:float
+
+    // type ResourceRequest =
+    //     | This of resource: Resource
+    //     | OneOf of resources: Set<Resource>
+    //     | FewOf of resource: Resource * quantity:int
+    //     | SomeOf of resource: Resource * quantity:float
+
+    // type Allocation =
+    //     | All
+    //     | Discrete of quantity:int
+    //     | Continuous of quantity:float
+
+    type AllocationRequest =
+        | OneOf of Set<Resource>
+        // | Nof of number:int * Set<Resource>
 
     type ModelState = {
         LastEventId : EventId
@@ -56,21 +116,13 @@ module rec Domain =
         LastPlanId : PlanId
         LastAllocationId : AllocationId
         Now : TimeStamp
-        ItemLocations : Map<ItemId, Location>
-        Locations : Map<Location, Set<ItemId>>
-        Capacities : Map<Resource, Capacity>
+        // Locations : Map<Location, Set<ItemId>>
         Availabilities : Map<Resource, Availability>
         Flows : Map<Flow, FlowState>
         Allocations : Map<AllocationId, Map<Resource, Allocation>>
+        PlanStates : Map<PlanId, PlanState>
     }
 
-    type Step =
-        | Allocate of allocationId: AllocationId * resources: ResourceRequest list
-        | Free of allocationId: AllocationId
-        | Move of item: ItemId * location: Location
-        | Delay of duration: float
-        | Open of flow: Flow * flowDescription: FlowDescription
-        | Close of flow: Flow
 
     type AllocationRequest = {
         AllocationId : AllocationId
@@ -78,67 +130,111 @@ module rec Domain =
         RemainingSteps : Step list
     }
 
-    type Event = {
-        Time : float
-        EventId : int64
-        RemainingSteps : Step list
-    }
+module Planning =
 
-    type Plan = {
-        PlanId : PlanId
-        Steps : Step list
-    }
+    open Domain
 
-    type PlanBuilder (state: ModelState) =
-        let planId, newState = 
-            let (PlanId lastPlanId) = state.LastPlanId
-            let nextPlanId = PlanId (lastPlanId + 1L)
-            let newState = { state with LastPlanId = nextPlanId }
-            nextPlanId, newState
+    type State<'a, 's> = ('s -> 'a * 's)
 
-        // member _.Yield ((state: ModelState, plan: Plan)) = 
-        //     state, plan
+    module State =
+        // Explicit
+        // let result x : State<'a, 's> = fun s -> x, s
+        // Less explicit but works better with other, existing functions:
+        let result x s = 
+            x, s
 
-        member _.Bind (m, f) = f m
+        let bind (f:'a -> State<'b, 's>) (m:State<'a, 's>) : State<'b, 's> =
+            // return a function that takes the state
+            fun s ->
+                // Get the value and next state from the m parameter
+                let a, s' = m s
+                // Get the next state computation by passing a to the f parameter
+                let m' = f a
+                // Apply the next state to the next computation
+                m' s'
 
-        member _.Yield _ = newState, { PlanId = planId; Steps = [] }
+        /// Evaluates the computation, returning the result value.
+        let eval (m:State<'a, 's>) (s:'s) = 
+            m s 
+            |> fst
 
-        member _.Run (state: ModelState, plan: Plan) = 
-            state, { PlanId = planId; Steps = List.rev plan.Steps }
+        /// Executes the computation, returning the final state.
+        let exec (m:State<'a, 's>) (s:'s) = 
+            m s
+            |> snd
 
-        // [<CustomOperation("allocate")>]
-        // member _.Allocate ((state: ModelState, plan: Plan), resourceRequest: ResourceRequest list) =
-        //     let (AllocationId requestId) = state.LastAllocationId
-        //     let nextAllocationId = AllocationId (requestId + 1L)
-        //     let newState = { state with LastAllocationId = nextAllocationId }
-        //     let newStep = Step.Allocate (nextAllocationId, resourceRequest)
-        //     (newState, { plan with Steps = newStep::plan.Steps }), nextAllocationId
+        /// Returns the state as the value.
+        let getState (s:'s) = 
+            s, s
 
-        // [<CustomOperation("free")>]
-        // member _.Allocate ((state: ModelState, steps: Step list), allocationId: AllocationId) =
-        //     let freeStep = Step.Free (allocationId)
-        //     state, freeStep::steps
+        /// Ignores the state passed in favor of the provided state value.
+        let setState (s:'s) = 
+            fun _ -> 
+                (), s
 
-        [<CustomOperation("pause")>]
-         member _.Pause ((state: ModelState, plan: Plan), (duration: float)) =
-            let delayStep = Step.Delay duration
-            // state, delayStep::steps
-            (newState, { plan with Steps = delayStep::plan.Steps })
 
-        // [<CustomOperation("open")>]
-        //  member _.Open ((state: ModelState, steps: Step list), flow: Flow, flowDescription: FlowDescription) =
-        //     let openStep = Step.Open (flow, flowDescription)
-        //     state, openStep::steps
+    type StateBuilder() =
+        member __.Return(value) : State<'a, 's> = 
+            State.result value
+        member __.Bind(m:State<'a, 's>, f:'a -> State<'b, 's>) : State<'b, 's> = 
+            State.bind f m
+        member __.ReturnFrom(m:State<'a, 's>) = 
+            m
+        member __.Zero() =
+            State.result ()
+        member __.Delay(f) = 
+            State.bind f (State.result ())
 
-        // [<CustomOperation("close")>]
-        //  member _.Close ((state: ModelState, steps: Step list), flow: Flow) =
-        //     let closeStep = Step.Close flow
-        //     state, closeStep::steps
+    type PlanAcc = PlanAcc of lastStepId:StepId * steps:Step list
 
-        // member _.Delay(f) =
-        //     fun (state: ModelState) -> f state
+    let state = StateBuilder()
 
-    // let plan = PlanBuilder
+    let getFood =
+        state {
+            printfn "GetFood"
+            let randomFood = 
+                if rng.NextDouble() > 0.5 then Food.Chicken
+                else Food.Rice
+            let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+            let nextStepId = StepId (lastStepId + 1)
+            let newStep = GetFood (nextStepId, randomFood)
+            let newAcc = PlanAcc (nextStepId, newStep::steps)
+            do! State.setState newAcc
+            return randomFood
+        }
+
+    type StateBuilder with
+
+        [<CustomOperation("sleep", MaintainsVariableSpaceUsingBind=true)>]
+        member this.Sleep (st:State<_,PlanAcc>, [<ProjectionParameter>] (duration: 'a -> int)) =
+            printfn $"Sleep"
+            state {
+                let! x = st
+                let d = duration x
+                printfn "Sleep: %A" duration
+                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+                let nextStepId = StepId (lastStepId + 1)
+                let newStep = Sleep (nextStepId, d)
+                let newAcc = PlanAcc (nextStepId, newStep::steps)
+                do! State.setState newAcc
+                return x 
+            }
+
+
+        [<CustomOperation("eat", MaintainsVariableSpaceUsingBind=true)>]
+        member this.Eat (st:State<_,PlanAcc>, [<ProjectionParameter>] (food: 'a -> Food)) =
+            printfn $"Eat"
+            state {
+                let! x = st
+                let f = food x
+                printfn "Eat: %A" food
+                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
+                let nextStepId = StepId (lastStepId + 1)
+                let newStep = Eat (nextStepId, f)
+                let newAcc = PlanAcc (nextStepId, newStep::steps)
+                do! State.setState newAcc
+                return x
+            }
 
 open Domain
 
