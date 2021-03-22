@@ -1,4 +1,4 @@
-open System.Collections.Generic
+//open System.Collections.Generic
 
 
 module rec Domain =
@@ -68,13 +68,14 @@ module rec Domain =
 
     type Allocation = {
         AllocationId : AllocationId
+        Quantity : int
         Resources : Set<Resource>
     }
 
     [<RequireQualifiedAccess>]
     type StepType =
         | Allocate of allocation: Allocation
-        | Free of allocationId: AllocationId
+        //| Free of allocationId: AllocationId
         | Delay of timeSpan: TimeSpan
         //| Move of item: ItemId * location: Location
         // | Open of flow: Flow * flowDescription: FlowDescription
@@ -92,19 +93,14 @@ module rec Domain =
     }
     type Plan = Plan of Step list
     type ProcedureId = ProcedureId of int64
-    type Procedure = {
-        ProcedureId : ProcedureId
-        Steps : Step list
-    }
-    type CurrentStep = {
-        Step : Step
-        Possibility : Possibility
-    }
+    module ProcedureId =
+        let next (ProcedureId i) =
+            ProcedureId (i + 1L)
     type ProcedureState = {
         StateId : StateId
         Processed : Step list
         Pending : Step list
-        Current : CurrentStep
+        Current : Step
 
     }
     type PossibilityId = PossibilityId of int64
@@ -136,9 +132,13 @@ module rec Domain =
     //type LocationId = LocationId of int64
     //type LocationName = LocationName of string
     //type Location = Location of locationId:LocationId * locationName:LocationName
-    type AllocationRequest =
-        | OneOf of Set<Resource>
-        // | Nof of number:int * Set<Resource>
+    type AllocationRequest = {
+        ProcedureId : ProcedureId
+        AllocationId : AllocationId
+        StateId : StateId
+        Quantity : int
+        Resources : Set<Resource>
+    }
 
     type ModelState = {
         LastPossibilityId : PossibilityId
@@ -146,9 +146,10 @@ module rec Domain =
         FreeResources : Set<Resource>
         Allocations : Map<ProcedureId * AllocationId, Set<Resource>>
         ProcedureStates : Map<ProcedureId, ProcedureState>
-        Possibilities : Set<Possibility>
-        OpenRequests : Set<ProcedureId * AllocationId>
-        AllocationRequests : Map<Resource, Set<ProcedureId * AllocationId>>
+        Possibilities : List<Possibility>
+        OpenRequests : List<AllocationRequest>
+        //RequestToResource : Map<ProcedureId * AllocationId, Resource>
+        //ResourceToRequest : Map<Resource, Set<ProcedureId * AllocationId>>
     }
 
     module ModelState =
@@ -157,6 +158,10 @@ module rec Domain =
             let next = PossibilityId.next s.LastPossibilityId
             next, { s with LastPossibilityId = next }
 
+        let nextProcedureId (s: ModelState) =
+            let next = ProcedureId.next s.LastProcedureId
+            next, { s with LastProcedureId = next}
+
         let initial =
             {
                 LastPossibilityId = PossibilityId 0L
@@ -164,13 +169,12 @@ module rec Domain =
                 FreeResources = Set.empty
                 Allocations = Map.empty
                 ProcedureStates = Map.empty
-                Possibilities = Set.empty
-                OpenRequests = Set.empty
-                AllocationRequests = Map.empty
+                Possibilities = []
+                OpenRequests = []
             }
 
         let addPossibility possibility modelState =
-            { modelState with Possibilities = Set.add possibility modelState.Possibilities }
+            { modelState with Possibilities = possibility::modelState.Possibilities }
 
 
         let addPossibilities (maxTime: TimeStamp) (generators: seq<Generator>) modelState : ModelState =
@@ -206,6 +210,118 @@ module rec Domain =
             initial
             |> addResources (model.Resources)
             |> addPossibilities maxTime model.Generators
+
+        let nextPossibility (modelState: ModelState) =
+            match modelState.Possibilities with
+            | [] -> None
+            | a::[] -> Some a
+            | x -> 
+                x 
+                |> List.sortBy (fun x -> x.TimeStamp, x.PossibilityId)
+                |> List.head
+                |> Some
+
+
+        module PossibilityHandlers =
+
+            let planArrival (now: TimeStamp) (Plan steps) (modelState: ModelState) =
+
+                match steps with
+                | [] ->
+                    // Should record empty plan
+                    modelState
+                | step::[] ->
+                    let nextProcedureId = ProcedureId.next modelState.LastProcedureId
+                    let stateId = StateId 0L
+                    let newProcedure = {
+                        StateId = stateId
+                        Pending = []
+                        Processed = []
+                        Current = step
+                    }
+                    let newProcedureStates = Map.add nextProcedureId newProcedure modelState.ProcedureStates
+
+                    match step.StepType with
+                    | StepType.Allocate a ->
+                        let allocationRequest : AllocationRequest = 
+                            {
+                                ProcedureId = nextProcedureId
+                                AllocationId = a.AllocationId
+                                StateId = stateId
+                                Quantity = a.Quantity
+                                Resources = a.Resources
+                            }
+                        let newOpenRequests = allocationRequest::modelState.OpenRequests
+                        { modelState with 
+                            LastProcedureId = nextProcedureId
+                            ProcedureStates = newProcedureStates
+                            OpenRequests = newOpenRequests }
+
+                    | StepType.Delay d ->
+                        let possibilityType = PossibilityType.Delay nextProcedureId
+                        let nextPossibilityId = PossibilityId.next modelState.LastPossibilityId
+                        let possibilityTime = now + d
+                        let newPossibility = Possibility.create nextPossibilityId possibilityTime possibilityType
+                        { modelState with
+                            LastProcedureId = nextProcedureId
+                            ProcedureStates = newProcedureStates
+                            Possibilities = newPossibility::modelState.Possibilities
+                        }
+                    //| StepType.Free f ->
+                    //    let possibilityType = PossibilityType.Free nextProcedureId
+                    //    let nextPossibilityId = PossibilityId.next modelState.LastPossibilityId
+                    //    let possibilityTime = now + d
+                    //    let newPossibility = Possibility.create nextPossibilityId possibilityTime possibilityType
+                    //    { modelState with
+                    //        LastProcedureId = nextProcedureId
+                    //        ProcedureStates = newProcedureStates
+                    //        Possibilities = newPossibility::modelState.Possibilities
+                    //    }
+                | step::remaining ->
+                    let nextProcedureId = ProcedureId.next modelState.LastProcedureId
+                    let stateId = StateId 0L
+                    let newProcedure = {
+                        StateId = stateId
+                        Pending = remaining
+                        Processed = []
+                        Current = step
+                    }
+                    let newProcedureStates = Map.add nextProcedureId newProcedure modelState.ProcedureStates
+
+                    match step.StepType with
+                    | StepType.Allocate a ->
+                        let allocationRequest : AllocationRequest = 
+                            {
+                                ProcedureId = nextProcedureId
+                                AllocationId = a.AllocationId
+                                StateId = stateId
+                                Quantity = a.Quantity
+                                Resources = a.Resources
+                            }
+                        let newOpenRequests = allocationRequest::modelState.OpenRequests
+                        { modelState with 
+                            LastProcedureId = nextProcedureId
+                            ProcedureStates = newProcedureStates
+                            OpenRequests = newOpenRequests }
+
+                    | StepType.Delay d ->
+                        let possibilityType = PossibilityType.Delay nextProcedureId
+                        let nextPossibilityId = PossibilityId.next modelState.LastPossibilityId
+                        let possibilityTime = now + d
+                        let newPossibility = Possibility.create nextPossibilityId possibilityTime possibilityType
+                        { modelState with
+                            LastProcedureId = nextProcedureId
+                            ProcedureStates = newProcedureStates
+                            Possibilities = newPossibility::modelState.Possibilities
+                        }
+                    
+
+        //let applyPossibility (next: Possibility) (modelState: ModelState) =
+
+        //    match next with
+        //    | PlanArrival plan ->
+            
+
             
 
 
@@ -274,8 +390,9 @@ module Planning =
             let! (PlanAcc (lastAllocationId, lastStepId, steps)) = State.getState
             let nextStepId = StepId.next lastStepId
             let nextAllocationId = AllocationId.next lastAllocationId
-            let allocation = {
+            let allocation : Allocation = {
                 AllocationId = nextAllocationId
+                Quantity = 1
                 Resources = resources
             }
             let stepType = StepType.Allocate allocation
@@ -309,23 +426,23 @@ module Planning =
             }
 
 
-        [<CustomOperation("free", MaintainsVariableSpaceUsingBind=true)>]
-        member this.Free (st:State<_,PlanAcc>, [<ProjectionParameter>] (allocationId: 'a -> AllocationId)) =
-            printfn $"Free"
-            state {
-                let! x = st
-                let a = allocationId x
-                let! (PlanAcc (state, lastStepId, steps)) = State.getState
-                let nextStepId = StepId.next lastStepId
-                let stepType = StepType.Free a
-                let newStep = {
-                    StepId = nextStepId
-                    StepType = stepType
-                }
-                let newAcc = PlanAcc (state, nextStepId, newStep::steps)
-                do! State.setState newAcc
-                return x 
-            }
+        //[<CustomOperation("free", MaintainsVariableSpaceUsingBind=true)>]
+        //member this.Free (st:State<_,PlanAcc>, [<ProjectionParameter>] (allocationId: 'a -> AllocationId)) =
+        //    printfn $"Free"
+        //    state {
+        //        let! x = st
+        //        let a = allocationId x
+        //        let! (PlanAcc (state, lastStepId, steps)) = State.getState
+        //        let nextStepId = StepId.next lastStepId
+        //        let stepType = StepType.Free a
+        //        let newStep = {
+        //            StepId = nextStepId
+        //            StepType = stepType
+        //        }
+        //        let newAcc = PlanAcc (state, nextStepId, newStep::steps)
+        //        do! State.setState newAcc
+        //        return x 
+        //    }
 
     let planner = PlanBuilder ()
 
@@ -347,11 +464,6 @@ let simplePlan =
     planner {
         let! a = allocateOneOf (Set resources)
         delay (TimeSpan 10.0)
-        free a
+        delay (TimeSpan 2.0)
     } |> Planning.create
-
-
-
-module Model =
-
 
