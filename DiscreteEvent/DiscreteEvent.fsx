@@ -3,9 +3,45 @@ open System.Collections.Generic
 
 module rec Domain =
 
+    type Distribution =
+        | Constant of float
+        | Uniform of lowerBound:float * upperBound:float
+
+    module Distribution =
+
+        let sample (distribution: Distribution) =
+            match distribution with
+            | Constant c -> c
+            | Uniform (lowerBound, upperBound) -> lowerBound // Yes, this is wrong
+
+    type GeneratorName = GeneratorName of string
+
+    type Generator = {
+        Name : GeneratorName
+        Distribution : Distribution
+        PossibilityType : PossibilityType
+    }
+
+    module Generator =
+    
+        let create name distribution possibilityType =
+            {
+                Name = name
+                Distribution = distribution
+                PossibilityType = possibilityType
+            }
+
+    type Model = {
+        Resources : Set<Resource>
+        Generators : Set<Generator>
+    }
     
     type StateId = StateId of int64
     type TimeStamp = TimeStamp of float
+    module TimeStamp =
+
+        let zero = TimeStamp 0.0
+
     type TimeSpan = TimeSpan of float
         with
 
@@ -26,9 +62,10 @@ module rec Domain =
 
     type AllocationId = AllocationId of int64
     module AllocationId =
-        let next allocationId =
-            let (AllocationId a) = allocationId
-            AllocationId (a + 1L)
+
+        let next (AllocationId allocationId) =
+            AllocationId (allocationId + 1L)
+
     type Allocation = {
         AllocationId : AllocationId
         Resources : Set<Resource>
@@ -53,17 +90,17 @@ module rec Domain =
         StepId : StepId
         StepType : StepType
     }
-
-    type PlanId = PlanId of int64
-    type Plan = {
-        PlanId : PlanId
+    type Plan = Plan of Step list
+    type ProcedureId = ProcedureId of int64
+    type Procedure = {
+        ProcedureId : ProcedureId
         Steps : Step list
     }
     type CurrentStep = {
         Step : Step
         Possibility : Possibility
     }
-    type PlanState = {
+    type ProcedureState = {
         StateId : StateId
         Processed : Step list
         Pending : Step list
@@ -71,16 +108,30 @@ module rec Domain =
 
     }
     type PossibilityId = PossibilityId of int64
+    module PossibilityId =
+        
+        let next (PossibilityId lastPossibilityId) =
+            PossibilityId (lastPossibilityId + 1L)
+
     type PossibilityType = 
-        | Delay
+        | Delay of procedureId: ProcedureId
+        | PlanArrival of plan: Plan
 
     type Possibility =
         {
             PossibilityId : PossibilityId
             TimeStamp : TimeStamp
             PossibilityType : PossibilityType
-            PlanId : PlanId
         }
+
+    module Possibility =
+        
+        let create possibilityId timeStamp possibilityType =
+            {
+                PossibilityId = possibilityId
+                TimeStamp = timeStamp
+                PossibilityType = possibilityType
+            }
 
     //type LocationId = LocationId of int64
     //type LocationName = LocationName of string
@@ -91,38 +142,79 @@ module rec Domain =
 
     type ModelState = {
         LastPossibilityId : PossibilityId
-        LastPlanId : PlanId
-        LastAllocationId : AllocationId
-        Availabilities : Map<Resource, Availability>
-        Allocations : Map<AllocationId, Set<Resource>>
-        PlanStates : Map<PlanId, PlanState>
+        LastProcedureId : ProcedureId
+        FreeResources : Set<Resource>
+        Allocations : Map<ProcedureId * AllocationId, Set<Resource>>
+        ProcedureStates : Map<ProcedureId, ProcedureState>
         Possibilities : Set<Possibility>
-        AllocationRequests : Map<Resource, Set<Allocation>>
+        OpenRequests : Set<ProcedureId * AllocationId>
+        AllocationRequests : Map<Resource, Set<ProcedureId * AllocationId>>
     }
 
     module ModelState =
 
-        let nextAllocationId (s: ModelState) =
-            let next = AllocationId.next s.LastAllocationId
-            next, { s with LastAllocationId = next }
+        let nextPossibilityId (s: ModelState) =
+            let next = PossibilityId.next s.LastPossibilityId
+            next, { s with LastPossibilityId = next }
 
         let initial =
             {
                 LastPossibilityId = PossibilityId 0L
-                LastPlanId = PlanId 0L
-                LastAllocationId = AllocationId 0L
-                Availabilities = Map []
-                Allocations = Map []
-                PlanStates = Map []
-                Possibilities = Set []
-                AllocationRequests = Map []
+                LastProcedureId = ProcedureId 0L
+                FreeResources = Set.empty
+                Allocations = Map.empty
+                ProcedureStates = Map.empty
+                Possibilities = Set.empty
+                OpenRequests = Set.empty
+                AllocationRequests = Map.empty
             }
+
+        let addPossibility possibility modelState =
+            { modelState with Possibilities = Set.add possibility modelState.Possibilities }
+
+
+        let addPossibilities (maxTime: TimeStamp) (generators: seq<Generator>) modelState : ModelState =
+
+            let rec add (lastTime: TimeStamp) (maxTime: TimeStamp) (modelState: ModelState) (generator: Generator) =
+                let nextTimespan = Distribution.sample generator.Distribution
+                let nextTime = lastTime + (TimeSpan nextTimespan)
+                if nextTime > maxTime then
+                    modelState
+                else
+                    let nextPossibilityId, modelState = ModelState.nextPossibilityId modelState
+                    let nextPossibility = Possibility.create nextPossibilityId nextTime generator.PossibilityType
+                    ModelState.addPossibility nextPossibility modelState
+
+
+            let modelState =
+                (modelState, generators)
+                ||> Seq.fold (add TimeStamp.zero maxTime)
+
+            modelState
+
+
+        let addResources resources modelState : ModelState =
+
+            let add modelState resource =
+                { modelState with FreeResources = Set.add resource modelState.FreeResources }
+            
+            (modelState, resources)
+            ||> Seq.fold add
+
+        let initialize (maxTime: TimeStamp) (model: Model) =
+            
+            initial
+            |> addResources (model.Resources)
+            |> addPossibilities maxTime model.Generators
+            
+
 
 module Planning =
 
     open Domain
 
     type State<'a, 's> = ('s -> 'a * 's)
+    type PlanAcc = PlanAcc of lastAllocationId:AllocationId * lastStepId:StepId * steps:Step list
 
     module State =
         // Explicit
@@ -173,16 +265,15 @@ module Planning =
         member __.Delay(f) = 
             State.bind f (State.result ())
 
-    type PlanAcc = PlanAcc of modelState:ModelState * lastStepId:StepId * steps:Step list
 
     let state = PlanBuilder()
 
-    let allocateOneOf (resources: Set<Resource>) =
+    let allocateOneOf (resources: Set<Resource>) : State<_,PlanAcc> =
         printfn "AllocateOneOf"
         state {
-            let! (PlanAcc (state, lastStepId, steps)) = State.getState
+            let! (PlanAcc (lastAllocationId, lastStepId, steps)) = State.getState
             let nextStepId = StepId.next lastStepId
-            let nextAllocationId, newModelState = ModelState.nextAllocationId state
+            let nextAllocationId = AllocationId.next lastAllocationId
             let allocation = {
                 AllocationId = nextAllocationId
                 Resources = resources
@@ -192,7 +283,7 @@ module Planning =
                 StepId = nextStepId
                 StepType = stepType
             }
-            let newAcc = PlanAcc (newModelState, nextStepId, newStep::steps)
+            let newAcc = PlanAcc (nextAllocationId, nextStepId, newStep::steps)
             do! State.setState newAcc
             return nextAllocationId
         }
@@ -238,10 +329,10 @@ module Planning =
 
     let planner = PlanBuilder ()
 
-    let create (modelState: ModelState) (plan: State<_,_>) =
-        let initialAcc = PlanAcc (modelState, StepId 0L, [])
+    let create (plan: State<_,_>) =
+        let initialAcc = PlanAcc (AllocationId 0L, StepId 0L, [])
         let (PlanAcc (resultState, _, resultPlan)) = State.exec plan initialAcc
-        resultState, List.rev resultPlan
+        Plan (List.rev resultPlan)
 
 open Domain
 open Planning
@@ -257,6 +348,10 @@ let simplePlan =
         let! a = allocateOneOf (Set resources)
         delay (TimeSpan 10.0)
         free a
-    }
+    } |> Planning.create
 
-let newState, newPlan = Planning.create ModelState.initial simplePlan
+
+
+module Model =
+
+
