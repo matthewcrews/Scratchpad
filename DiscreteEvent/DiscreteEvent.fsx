@@ -1,73 +1,76 @@
-module Domain =
+open System.Collections.Generic
+
+
+module rec Domain =
 
     
     type StateId = StateId of int64
     type TimeStamp = TimeStamp of float
+    type TimeSpan = TimeSpan of float
+        with
+
+        static member (+) (TimeStamp stamp, TimeSpan span) =
+            TimeStamp (stamp + span)
+
+        static member (+) (span:TimeSpan, stamp:TimeStamp) =
+            stamp + span
 
     type ResourceName = ResourceName of string
     type ResourceId = ResourceId of int64
     type Resource = Resource of resourceName:ResourceName * resourceId:ResourceId
+    [<RequireQualifiedAccess>]
+    type Availability =
+        | Free
+        | Allocated of allocationId:AllocationId
 
     type AllocationId = AllocationId of int64
+    module AllocationId =
+        let next allocationId =
+            let (AllocationId a) = allocationId
+            AllocationId (a + 1L)
     type Allocation = {
         AllocationId : AllocationId
         Resources : Set<Resource>
     }
 
+    [<RequireQualifiedAccess>]
     type StepType =
-        | Allocate of allocationId: AllocationId * resources: ResourceRequest list
+        | Allocate of allocation: Allocation
         | Free of allocationId: AllocationId
-        | Move of item: ItemId * location: Location
-        | Delay of duration: float
+        | Delay of timeSpan: TimeSpan
+        //| Move of item: ItemId * location: Location
         // | Open of flow: Flow * flowDescription: FlowDescription
         // | Close of flow: Flow
 
     type StepId = StepId of int64
-    type Step = stepId:StepId * stepType:StepType
+    module StepId =
+        let next stepId =
+            let (StepId s) = stepId
+            StepId (s + 1L)
+
+    type Step = {
+        StepId : StepId
+        StepType : StepType
+    }
 
     type PlanId = PlanId of int64
     type Plan = {
         PlanId : PlanId
         Steps : Step list
     }
+    type CurrentStep = {
+        Step : Step
+        Possibility : Possibility
+    }
     type PlanState = {
+        StateId : StateId
         Processed : Step list
         Pending : Step list
-        Current : Step * Event
+        Current : CurrentStep
 
     }
-
-
-    type LocationId = LocationId of int64
-    type LocationName = LocationName of string
-    type Location = Location of locationId:LocationId * locationName:LocationName
-    // type ItemId = ItemId of int64
-    // type Item<'a> = {
-    //     ItemId : ItemId
-    //     Type : 'a
-    // }
-
-
-
-    // type Vessel = Vessel of string
-    // type VesselId = VesselId of int64
-    // type Flow = Flow of string
-    // type FlowId = FlowId of int64
-    // type FlowRate = FlowRate of float
-    // type FlowComponent = FlowComponent of percent:float * element:string
-    // type FlowComposition = FlowComposition of FlowComponent list
-    // type FlowDescription = {
-    //     FlowRate : FlowRate
-    //     FlowComposition : FlowComposition
-    // }
-    // type FlowState =
-    //     | Closed
-    //     | Open of FlowDescription
-
     type PossibilityId = PossibilityId of int64
     type PossibilityType = 
-        | Allocate of planId:PlanId * allocationId:AllocationId
-        | Free of planId:PlanId * allocationId:AllocationId
         | Delay
 
     type Possibility =
@@ -76,59 +79,31 @@ module Domain =
             TimeStamp : TimeStamp
             PossibilityType : PossibilityType
             PlanId : PlanId
-
         }
 
-
-
-
-
-
-    // type Availability =
-    //     | Nothing
-    //     | One
-    //     | Discrete of max:int
-    //     | Continuous of max:float
-
-    // type Capacity =
-    //     | Singleton
-    //     | Discrete of max:int
-    //     | Continuous of max:float
-
-    // type ResourceRequest =
-    //     | This of resource: Resource
-    //     | OneOf of resources: Set<Resource>
-    //     | FewOf of resource: Resource * quantity:int
-    //     | SomeOf of resource: Resource * quantity:float
-
-    // type Allocation =
-    //     | All
-    //     | Discrete of quantity:int
-    //     | Continuous of quantity:float
-
+    //type LocationId = LocationId of int64
+    //type LocationName = LocationName of string
+    //type Location = Location of locationId:LocationId * locationName:LocationName
     type AllocationRequest =
         | OneOf of Set<Resource>
         // | Nof of number:int * Set<Resource>
 
     type ModelState = {
-        LastEventId : EventId
-        LastStateId : StateId
+        LastPossibilityId : PossibilityId
         LastPlanId : PlanId
         LastAllocationId : AllocationId
-        Now : TimeStamp
-        // Locations : Map<Location, Set<ItemId>>
         Availabilities : Map<Resource, Availability>
-        Flows : Map<Flow, FlowState>
-        Allocations : Map<AllocationId, Map<Resource, Allocation>>
+        Allocations : Map<AllocationId, Set<Resource>>
         PlanStates : Map<PlanId, PlanState>
+        Possibilities : SortedSet<Possibility>
+        AllocationRequests : Map<ResourceId, Set<Allocation>>
     }
 
+    module ModelState =
 
-    type AllocationRequest = {
-        AllocationId : AllocationId
-        Resources : ResourceRequest list
-        RemainingSteps : Step list
-    }
+        let nextAllocationId (s: ModelState) =
+            let next = AllocationId.next s.LastAllocationId
+            next, { s with LastAllocationId = next }
 
 module Planning =
 
@@ -173,7 +148,7 @@ module Planning =
                 (), s
 
 
-    type StateBuilder() =
+    type PlanBuilder() =
         member __.Return(value) : State<'a, 's> = 
             State.result value
         member __.Bind(m:State<'a, 's>, f:'a -> State<'b, 's>) : State<'b, 's> = 
@@ -185,55 +160,67 @@ module Planning =
         member __.Delay(f) = 
             State.bind f (State.result ())
 
-    type PlanAcc = PlanAcc of lastStepId:StepId * steps:Step list
+    type PlanAcc = PlanAcc of modelState:ModelState * lastStepId:StepId * steps:Step list
 
-    let state = StateBuilder()
+    let state = PlanBuilder()
 
-    let getFood =
+    let allocateOneOf (resources: Set<Resource>) =
+        printfn "AllocateOneOf"
         state {
-            printfn "GetFood"
-            let randomFood = 
-                if rng.NextDouble() > 0.5 then Food.Chicken
-                else Food.Rice
-            let! (PlanAcc (StepId lastStepId, steps)) = State.getState
-            let nextStepId = StepId (lastStepId + 1)
-            let newStep = GetFood (nextStepId, randomFood)
-            let newAcc = PlanAcc (nextStepId, newStep::steps)
+            let! (PlanAcc (state, lastStepId, steps)) = State.getState
+            let nextStepId = StepId.next lastStepId
+            let nextAllocationId, newModelState = ModelState.nextAllocationId state
+            let allocation = {
+                AllocationId = nextAllocationId
+                Resources = resources
+            }
+            let stepType = StepType.Allocate allocation
+            let newStep = {
+                StepId = nextStepId
+                StepType = stepType
+            }
+            let newAcc = PlanAcc (newModelState, nextStepId, newStep::steps)
             do! State.setState newAcc
-            return randomFood
+            return nextAllocationId
         }
 
-    type StateBuilder with
+    type PlanBuilder with
 
-        [<CustomOperation("sleep", MaintainsVariableSpaceUsingBind=true)>]
-        member this.Sleep (st:State<_,PlanAcc>, [<ProjectionParameter>] (duration: 'a -> int)) =
-            printfn $"Sleep"
+        [<CustomOperation("delay", MaintainsVariableSpaceUsingBind=true)>]
+        member this.Delay (st:State<_,PlanAcc>, [<ProjectionParameter>] (duration: 'a -> TimeSpan)) =
+            printfn $"Delay"
             state {
                 let! x = st
                 let d = duration x
-                printfn "Sleep: %A" duration
-                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
-                let nextStepId = StepId (lastStepId + 1)
-                let newStep = Sleep (nextStepId, d)
-                let newAcc = PlanAcc (nextStepId, newStep::steps)
+                let! (PlanAcc (state, lastStepId, steps)) = State.getState
+                let nextStepId = StepId.next lastStepId
+                let stepType = StepType.Delay d
+                let newStep = {
+                    StepId = nextStepId
+                    StepType = stepType
+                }
+                let newAcc = PlanAcc (state, nextStepId, newStep::steps)
                 do! State.setState newAcc
                 return x 
             }
 
 
-        [<CustomOperation("eat", MaintainsVariableSpaceUsingBind=true)>]
-        member this.Eat (st:State<_,PlanAcc>, [<ProjectionParameter>] (food: 'a -> Food)) =
-            printfn $"Eat"
+        [<CustomOperation("free", MaintainsVariableSpaceUsingBind=true)>]
+        member this.Free (st:State<_,PlanAcc>, [<ProjectionParameter>] (allocationId: 'a -> AllocationId)) =
+            printfn $"Free"
             state {
                 let! x = st
-                let f = food x
-                printfn "Eat: %A" food
-                let! (PlanAcc (StepId lastStepId, steps)) = State.getState
-                let nextStepId = StepId (lastStepId + 1)
-                let newStep = Eat (nextStepId, f)
-                let newAcc = PlanAcc (nextStepId, newStep::steps)
+                let a = allocationId x
+                let! (PlanAcc (state, lastStepId, steps)) = State.getState
+                let nextStepId = StepId.next lastStepId
+                let stepType = StepType.Free a
+                let newStep = {
+                    StepId = nextStepId
+                    StepType = stepType
+                }
+                let newAcc = PlanAcc (state, nextStepId, newStep::steps)
                 do! State.setState newAcc
-                return x
+                return x 
             }
 
 open Domain
