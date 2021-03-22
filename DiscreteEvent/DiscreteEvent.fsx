@@ -15,9 +15,10 @@ module rec Domain =
         static member (+) (span:TimeSpan, stamp:TimeStamp) =
             stamp + span
 
-    type ResourceName = ResourceName of string
-    type ResourceId = ResourceId of int64
-    type Resource = Resource of resourceName:ResourceName * resourceId:ResourceId
+    //type ResourceName = ResourceName of string
+    //type ResourceId = ResourceId of int64
+    //type Resource = Resource of resourceName:ResourceName * resourceId:ResourceId
+    type Resource = Resource of string
     [<RequireQualifiedAccess>]
     type Availability =
         | Free
@@ -95,8 +96,8 @@ module rec Domain =
         Availabilities : Map<Resource, Availability>
         Allocations : Map<AllocationId, Set<Resource>>
         PlanStates : Map<PlanId, PlanState>
-        Possibilities : SortedSet<Possibility>
-        AllocationRequests : Map<ResourceId, Set<Allocation>>
+        Possibilities : Set<Possibility>
+        AllocationRequests : Map<Resource, Set<Allocation>>
     }
 
     module ModelState =
@@ -104,6 +105,18 @@ module rec Domain =
         let nextAllocationId (s: ModelState) =
             let next = AllocationId.next s.LastAllocationId
             next, { s with LastAllocationId = next }
+
+        let initial =
+            {
+                LastPossibilityId = PossibilityId 0L
+                LastPlanId = PlanId 0L
+                LastAllocationId = AllocationId 0L
+                Availabilities = Map []
+                Allocations = Map []
+                PlanStates = Map []
+                Possibilities = Set []
+                AllocationRequests = Map []
+            }
 
 module Planning =
 
@@ -223,36 +236,27 @@ module Planning =
                 return x 
             }
 
+    let planner = PlanBuilder ()
+
+    let create (modelState: ModelState) (plan: State<_,_>) =
+        let initialAcc = PlanAcc (modelState, StepId 0L, [])
+        let (PlanAcc (resultState, _, resultPlan)) = State.exec plan initialAcc
+        resultState, List.rev resultPlan
+
 open Domain
-
-let initialState = {
-    LastEventId = EventId 0L
-    LastStateId = StateId 0L
-    LastPlanId = PlanId 0L
-    LastAllocationId = AllocationId 0L
-    Now = TimeStamp 0.0
-    ItemLocations = Map []
-    Locations = Map []
-    Capacities = Map []
-    Availabilities = Map []
-    Flows = Map []
-    Allocations = Map []
-}
-
-let allocate (resourceRequest: ResourceRequest list) =
-    fun (state: ModelState, plan: Plan) ->
-        let (AllocationId requestId) = state.LastAllocationId
-        let nextAllocationId = AllocationId (requestId + 1L)
-        let newState = { state with LastAllocationId = nextAllocationId }
-        let newStep = Step.Allocate (nextAllocationId, resourceRequest)
-        (newState, { plan with Steps = newStep::plan.Steps }), nextAllocationId
-
-
-let newState, plan =
-    PlanBuilder initialState {
-        let! allocationId = allocate []
-        pause 10.0
-        pause 1.0
-    }
+open Planning
 
         
+let resources = 
+    [for i in 1..5 -> Resource $"Resource:{i}"]
+
+
+
+let simplePlan =
+    planner {
+        let! a = allocateOneOf (Set resources)
+        delay (TimeSpan 10.0)
+        free a
+    }
+
+let newState, newPlan = Planning.create ModelState.initial simplePlan
