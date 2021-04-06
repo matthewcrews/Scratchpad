@@ -4,9 +4,9 @@ open FSharp.Data
 open System.Reflection
 open Microsoft.FSharp.Reflection
 
-type Test = CsvProvider<"TestData.csv">
+type Test = CsvProvider<"ExampleData.csv">
 let inputFile = "TestData.csv"
-let inputFilepath = System.IO.Path.Combine(__SOURCE_DIRECTORY__, "TestData.csv")
+let inputFilepath = System.IO.Path.Combine(__SOURCE_DIRECTORY__, inputFile)
 let data = Test.Load inputFilepath
 
 for row in data.Rows do
