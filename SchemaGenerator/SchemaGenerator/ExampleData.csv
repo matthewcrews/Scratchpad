@@ -1,0 +1,8 @@
+IsFunny,Name,Key,Size,Weight,Birthday,Comment
+TRUE,Turkey,,,,,
+FALSE,Chicken,1,1,1.56,1/1/2021,Here is a really long comment in a field
+TRUE,Monkey,2,2,2.546,1/1/2021,
+TRUE,Turkey,3,1.5,2.98,1/1/2021,
+TRUE,Axle,4,,2.98,1/1/2021,
+TRUE,Turkey,5,1.5,2.98,,
+TRUE,Turkey,6,,,,

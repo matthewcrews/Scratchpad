@@ -1,8 +1,6 @@
 #r "nuget: FSharp.Data"
 
 open FSharp.Data
-open System.Reflection
-open Microsoft.FSharp.Reflection
 
 type Test = CsvProvider<"ExampleData.csv">
 let inputFile = "TestData.csv"
@@ -12,6 +10,8 @@ let data = Test.Load inputFilepath
 for row in data.Rows do
     printfn "%A" row.Birthday
 
+open System.Reflection
+open Microsoft.FSharp.Reflection
 
 let aRow = Seq.head data.Rows
 let rowType = typeof<Test.Row>
