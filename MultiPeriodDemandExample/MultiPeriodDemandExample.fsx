@@ -64,7 +64,7 @@ module MultiPeriodDemand =
         ProductionCapacity : SMap<Month, float>
         ProductionCost : SMap<Month, float>
         HoldingCostPercent : float
-        Months : Month list
+        Months : Set<Month>
     }
 
     module Input =
@@ -75,10 +75,11 @@ module MultiPeriodDemand =
             
             Month month, value
 
-        let private createValuesForMonths (requiredMonths: list<Month>) (input: seq<int*float>) =
+        let private createValuesForMonths (requiredMonths: Set<Month>) (input: seq<int*float>) =
             let result =
                 input
                 |> Seq.map createValueForMonth
+                |> Seq.filter (fun (month, _) -> Set.contains month requiredMonths)
                 |> SMap
 
             // Idiot check here :)
@@ -99,7 +100,7 @@ module MultiPeriodDemand =
                 months 
                 |> Seq.map Month 
                 |> Seq.sort 
-                |> List.ofSeq
+                |> Set
 
             let newStorageCapacity = createValuesForMonths newMonths storageCapacity
             let newDemand = createValuesForMonths newMonths demand
