@@ -325,6 +325,7 @@ module Solver =
             splitProportionConstraintCount
             
         let b = DenseVector.zero<float> totalRows
+        let x = DenseVector.zero<float> totalColumns
         let A = DenseMatrix.zero<float> totalRows totalColumns
 
 
@@ -362,6 +363,7 @@ module Solver =
             A.[rowIdx, varToIdx.[outboundVar]] <- 1.0
             A.[rowIdx, varToIdx.[outboundSlackVar]] <- 1.0
             b.[rowIdx] <- conversion.MaxRate
+            x.[varToIdx.[outboundSlackVar]] <- conversion.MaxRate
 
             rowIdx <- rowIdx + 1
 
@@ -409,6 +411,8 @@ module Solver =
                 idxToVar.Add(nextColIdx, outboundVar)
                 nextColIdx <- nextColIdx + 1
             A.[rowIdx, varToIdx.[outboundVar]] <- -1.0
+            // This needs to be expanded to deal with proportional constraints
+
 
         // Add Split rows
         for KeyValue (split, (inboundArc, outboundArcs)) in model.Split do
@@ -426,14 +430,67 @@ module Solver =
                     idxToVar.Add(nextColIdx, variable)
                     nextColIdx <- nextColIdx + 1
                 A.[rowIdx, varToIdx.[variable]] <- -1.0
+            
+            // This needs to be expanded to deal with proportional constraints
 
-        A, b, varToIdx, idxToVar
+
+        A, x, b, varToIdx, idxToVar
+
+    let swapColumns (targetCol: int) (sourceCol: int) (A: Matrix<float>, x:Vector<float>, varToIdx:System.Collections.Generic.Dictionary<_,_>, idxToVar:System.Collections.Generic.Dictionary<_,_>) =
+        if targetCol <> sourceCol then
+            let temp = A.[*, targetCol]
+            A.[*, targetCol] <- A.[*, sourceCol]
+            A.[*, sourceCol] <- temp
+
+            let sourceColVar = idxToVar.[sourceCol]
+            let targetColVar = idxToVar.[targetCol]
+            // Update varToIdx
+            varToIdx.[sourceColVar] <- targetCol
+            varToIdx.[targetColVar] <- sourceCol
+            // Update idxToVar
+            idxToVar.[targetCol] <- sourceColVar
+            idxToVar.[sourceCol] <- targetColVar
+
+            // Update x
+            let sourceX = x.[sourceCol]
+            x.[sourceCol] <- x.[targetCol]
+            x.[targetCol] <- sourceX
+
+        A, x, varToIdx, idxToVar
+
+    let arrangeForSolve (model: Model) (A: Matrix<float>, x:Vector<float>, b:Vector<float>, varToIdx:System.Collections.Generic.Dictionary<_,_>, idxToVar:System.Collections.Generic.Dictionary<_,_>) =
+        // Move outbound column to the edge of what will become the Basis, B
+        let (_, (_, outbound)) = model.Conversion |> Map.toSeq |> Seq.head
+        let targetCol = A.RowCount
+        let slackVar = Variable.slackFor outbound
+        let sourceCol = varToIdx.[slackVar]
+
+        // Make sure the exiting column is where we want
+        let A, x, varToIdx, idxToVar = swapColumns targetCol sourceCol (A, x, varToIdx, idxToVar)
+
+        let flowVar = Variable.ofArc outbound
+        let sourceCol = varToIdx.[flowVar]
+        let targetCol = 0
+        // Make sure our entering variable is in the right place
+        let A, x, varToIdx, idxToVar = swapColumns targetCol sourceCol (A, x, varToIdx, idxToVar)
+
+        A, x, b, varToIdx, idxToVar
+        
 
     let solve (model: Model) =
 
-        let A, b, varToIdx, idxToVar = buildInitialSystem model
+        let A, x, b, varToIdx, idxToVar = 
+            buildInitialSystem model
+            |> arrangeForSolve model
 
-        ()
+        let B = A.[*, 1..A.RowCount]
+        let u = B.Solve A.[*, 0] // We arranged for this to work
+        let theta = x.[A.RowCount] / u.[u.Count - 1] // This will always be theta due to the arrangement
+        let newX = x.[1..A.RowCount] - theta * u
+        newX.[A.RowCount] <- theta
+
+        varToIdx
+        |> Seq.map (fun (KeyValue(variable, _)) -> variable, newX.[varToIdx.[variable]])
 
 
 let source : Source = { Name = "Source1" }
@@ -449,8 +506,16 @@ let m =
         arc.connect (process2, sink)
     ]
 
-let (A, b, varToIdx, idxToVar) = Solver.buildInitialSystem m
-b
+let s = Solver.solve m
+
+//let (A, x, b, varToIdx, idxToVar) = Solver.buildInitialSystem m
+//b
+//A * x
+//let B, u = Solver.solve m
+//u
+//x.[1..5] ./ u
+//x.[A.RowCount] / u.[u.Count - 1]
+//x 
 //let (conversionLimits, balances) = Solver.decompose m
 //let (pivotExpr, pivotLimit), remainingConversionLimits = Solver.getPivot conversionLimits
 
