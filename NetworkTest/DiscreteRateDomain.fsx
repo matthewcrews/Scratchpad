@@ -124,19 +124,62 @@ type Model (arcs: Arc list) =
         |> List.collect (fun x -> [x.Sink; x.Source])
         |> Set
 
-    let inbound =
+    let outboundArcs =
         arcs
         |> List.groupBy (fun x -> x.Source)
         |> Map
 
-    let outbound =
+    let inboundArcs =
         arcs
         |> List.groupBy (fun x -> x.Sink)
         |> Map
 
+    let (conversion, tank, merge, split) =
+        nodes
+        |> Seq.fold (fun (conversionArcs, tankArcs, mergeArcs, splitArcs) node ->
+            match node with
+            | Node.Conversion conversion ->
+                let inbound = 
+                    match inboundArcs.[node] with
+                    | [arc] -> arc
+                    | _ -> invalidArg "Inbound" "Cannot have Conversion with more than one input"
+                let outbound = 
+                    match outboundArcs.[node] with
+                    | [arc] -> arc
+                    | _ -> invalidArg "Inbound" "Cannot have Conversion with more than one output"
+                let newConversionArcs = Map.add conversion (inbound, outbound) conversionArcs
+                newConversionArcs, tankArcs, mergeArcs, splitArcs
+            | Node.Merge merge ->
+                let inbound = inboundArcs.[node]
+                let outbound = 
+                    match outboundArcs.[node] with
+                    | [arc] -> arc
+                    | _ -> invalidArg "Inbound" "Cannot have Merge with more than one output"
+                let newMerge = Map.add merge (inbound, outbound) mergeArcs
+                conversionArcs, tankArcs, newMerge, splitArcs
+            | Node.Split split ->
+                let inbound = 
+                    match inboundArcs.[node] with
+                    | [arc] -> arc
+                    | _ -> invalidArg "Inbound" "Cannot have Split with more than one input"
+                let outbound = outboundArcs.[node]
+                let newSplit = Map.add split (inbound, outbound) splitArcs
+                conversionArcs, tankArcs, mergeArcs, newSplit
+            | Node.Tank tank ->
+                let inbound = inboundArcs.[node]
+                let outbound = outboundArcs.[node]
+                let newTank = Map.add tank (inbound, outbound) tankArcs
+                conversionArcs, newTank, mergeArcs, splitArcs
+            | _ -> 
+                conversionArcs, tankArcs, mergeArcs, splitArcs
+        ) (Map.empty, Map.empty, Map.empty<Merge, (Arc list * Arc)>, Map.empty)
+
+    member _.Arcs = Set arcs
     member _.Nodes = nodes
-    member _.Inbound = inbound
-    member _.Outbound = outbound
+    member _.Conversion = conversion
+    member _.Tank = tank
+    member _.Merge = merge
+    member _.Split = split
 
 
 type arc () =
@@ -248,18 +291,18 @@ module Solver =
 
     open MathNet.Numerics.LinearAlgebra
     
-    type private Variable = Variable of string
+    type Variable = Variable of string
         with
         member this.Value =
             let (Variable value) = this
             value
 
-    type private Term = {
+    type Term = {
         Variable : Variable
         Coefficient : float
     }
 
-    module private Term =
+    module Term =
         let create variable coefficient =
             if System.String.IsNullOrEmpty variable then
                 invalidArg (nameof variable) $"{nameof variable} cannot be null or empty"
@@ -268,14 +311,14 @@ module Solver =
                 Coefficient = coefficient
             }
 
-    type private ConversionExpr = ConversionExpr of List<Term>
-    type private BalanceExpr = BalanceExpr of List<Term>
-    type private Limit = {
+    type ConversionExpr = ConversionExpr of List<Term>
+    type BalanceExpr = BalanceExpr of List<Term>
+    type Limit = {
         Variable : Variable
         Value : float
     }
 
-    module private Limit =
+    module Limit =
 
         let create (variable: string) value =
             if System.String.IsNullOrEmpty variable then
@@ -351,7 +394,7 @@ module Solver =
         | _ ->
             [], []
 
-    let private decompose (model: Model) =
+    let decompose (model: Model) =
 
         let conversionLimits, balances =
             model.Nodes
@@ -361,14 +404,17 @@ module Solver =
         conversionLimits, balances
 
 
+    let getPivot (conversionLimits: (ConversionExpr * Limit) list) =
+        match conversionLimits with
+        | [] -> invalidArg "Model" "Unbounded model. There must be at least 1 Conversion in the network otherwise there is unlimited flow."
+        | head::tail -> head, tail
+
+
     let solve (model: Model) =
 
         let conversionLimits, balances = decompose model
 
-        let (ConversionExpr pivotConversion, pivotLimit), remainingConversionLimits = 
-            match conversionLimits with
-            | [] -> invalidArg (nameof model) "Unbounded model. There must be at least 1 Conversion in the network otherwise there is unlimited flow."
-            | head::tail -> head, tail
+        let (ConversionExpr pivotConversion, pivotLimit), remainingConversionLimits = getPivot conversionLimits
 
         let remainingConversions, remainingLimits =
             remainingConversionLimits
@@ -543,5 +589,8 @@ let m =
         arc.connect (tank1, process2)
         arc.connect (process2, sink)
     ]
+
+let (conversionLimits, balances) = Solver.decompose m
+let (pivotExpr, pivotLimit), remainingConversionLimits = Solver.getPivot conversionLimits
 
 let (testA, testB) = Solver.solve m
