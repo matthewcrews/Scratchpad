@@ -1,6 +1,13 @@
-type Coefficient = Coefficient of float
-type Proportion = Proportion of float
-type MaxRate = MaxRate of float
+//type Coefficient = Coefficient of float
+//type Proportion = Proportion of float
+//    with
+//    static member (+) (Proportion a, Proportion b) =
+//        Proportion (a + b)
+//    static member (/) (Proportion a, Proportion b) =
+//        (a / b)
+//    static member Zero = Proportion 0.0
+
+//type MaxRate = MaxRate of float
 
 // Node types
 type Source = {
@@ -11,9 +18,25 @@ type Sink = {
 }
 type Conversion = {
     Name : string
-    Coefficient : Coefficient
-    MaxRate : MaxRate
+    ConversionFactor : float
+    MaxRate : float
 }
+
+module Conversion =
+
+    let create name conversionFactor maxRate =
+        if conversionFactor <= 0.0 then
+            invalidArg (nameof conversionFactor) $"Cannot have a {nameof conversionFactor} <= 0.0"
+
+        if maxRate <= 0.0 then
+            invalidArg (nameof maxRate) $"Cannot have a {nameof maxRate} <= 0.0"
+
+        {
+            Name = name
+            ConversionFactor = conversionFactor
+            MaxRate = maxRate
+        }
+
 type Merge = {
     Name : string
 }
@@ -44,42 +67,37 @@ type Node =
 type Arc = {
     Source : Node
     Sink : Node
-    Proportion : Proportion
+    Proportion : float
 } with
     member this.Name =
         $"{this.Source.Name}->{this.Sink.Name}"
 
 
-module Variable =
-    let create variable =
-        if System.String.IsNullOrEmpty variable then
-            invalidArg (nameof variable) "Cannot create Variable from null or empty string"
+//module Coefficient =
+//    let create coefficient =
+//        if coefficient <= 0.0 then
+//            invalidArg (nameof coefficient) "Cannot have a Coefficient <= 0.0"
 
-        Variable variable
+//        Coefficient coefficient
 
-module Coefficient =
-    let create coefficient =
-        if coefficient <= 0.0 then
-            invalidArg (nameof coefficient) "Cannot have a Coefficient <= 0.0"
+//module Proportion =
+//    let create proportion =
+//        if proportion <= 0.0 then
+//            invalidArg (nameof proportion) "Cannot have a Proportion <= 0.0"
 
-        Coefficient coefficient
+//        Proportion proportion
 
-module Proportion =
-    let create proportion =
-        if proportion <= 0.0 then
-            invalidArg (nameof proportion) "Cannot have a Proportion <= 0.0"
+//module MaxRate =
+//    let create maxRate =
+//        if maxRate <= 0.0 then
+//            invalidArg (nameof maxRate) "Cannot have a MaxRate <= 0.0"
 
-        Proportion proportion
-
-module MaxRate =
-    let create maxRate =
-        if maxRate <= 0.0 then
-            invalidArg (nameof maxRate) "Cannot have a MaxRate <= 0.0"
-
-        MaxRate maxRate
+//        MaxRate maxRate
 
 module Arc =
     let create source sink proportion =
+        if proportion <= 0.0 then
+            invalidArg (nameof proportion) "Cannot have a Proportion <= 0.0"
         {
             Source = source
             Sink = sink
@@ -112,10 +130,10 @@ type arc () =
     static member connect (source: Conversion, dest: Conversion) =
         let s = Node.Conversion source
         let d = Node.Conversion dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
-    static member connect (source: Conversion, dest: Merge, proportion:Proportion) =
+    static member connect (source: Conversion, dest: Merge, proportion:float) =
         let s = Node.Conversion source
         let d = Node.Merge dest
         Arc.create s d proportion
@@ -123,28 +141,28 @@ type arc () =
     static member connect (source: Conversion, dest: Sink) =
         let s = Node.Conversion source
         let d = Node.Sink dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Conversion, dest: Split) =
         let s = Node.Conversion source
         let d = Node.Split dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Conversion, dest: Tank) =
         let s = Node.Conversion source
         let d = Node.Tank dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Merge, dest: Conversion) =
         let s = Node.Merge source
         let d = Node.Conversion dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
-    static member connect (source: Merge, dest: Merge, proportion:Proportion) =
+    static member connect (source: Merge, dest: Merge, proportion:float) =
         let s = Node.Merge source
         let d = Node.Merge dest
         Arc.create s d proportion
@@ -152,28 +170,28 @@ type arc () =
     static member connect (source: Merge, dest: Sink) =
         let s = Node.Merge source
         let d = Node.Sink dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
         
     static member connect (source: Merge, dest: Split) =
         let s = Node.Merge source
         let d = Node.Split dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Merge, dest: Tank) =
         let s = Node.Merge source
         let d = Node.Tank dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Source, dest: Conversion) =
         let s = Node.Source source
         let d = Node.Conversion dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
     
-    static member connect (source: Source, dest: Merge, proportion:Proportion) =
+    static member connect (source: Source, dest: Merge, proportion:float) =
         let s = Node.Source source
         let d = Node.Merge dest
         Arc.create s d proportion
@@ -181,16 +199,16 @@ type arc () =
     static member connect (source: Source, dest: Split) =
         let s = Node.Source source
         let d = Node.Split dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Tank, dest: Conversion) =
         let s = Node.Tank source
         let d = Node.Conversion dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
-    static member connect (source: Tank, dest: Merge, proportion:Proportion) =
+    static member connect (source: Tank, dest: Merge, proportion:float) =
         let s = Node.Tank source
         let d = Node.Merge dest
         Arc.create s d proportion
@@ -198,13 +216,13 @@ type arc () =
     static member connect (source: Tank, dest: Split) =
         let s = Node.Tank source
         let d = Node.Split dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
     static member connect (source: Tank, dest: Tank) =
         let s = Node.Tank source
         let d = Node.Tank dest
-        let p = Proportion 1.0
+        let p = 1.0
         Arc.create s d p
 
 
@@ -212,13 +230,13 @@ let source : Source = { Name = "Source1" }
 let sink : Sink = { Name = "Sink1" }
 let process1 = {
     Name = "Process1"
-    Coefficient = Coefficient 1.0
-    MaxRate = MaxRate 10.0
+    ConversionFactor = 1.0
+    MaxRate = 10.0
 }
 let process2 = {
     Name = "Process2"
-    Coefficient = Coefficient 1.0
-    MaxRate = MaxRate 5.0
+    ConversionFactor = 1.0
+    MaxRate = 5.0
 }
 let tank1 : Tank = { Name = "Tank1" }
 
@@ -239,24 +257,52 @@ module Solver =
     open MathNet.Numerics.LinearAlgebra
     
     type Variable = Variable of string
-    type LinExpr = Map<Variable, Coefficient>
+    type BalanceExpr = BalanceExpr of List<Variable * float>
+    type Limit = Limit of variable:Variable * value:float
 
-    let getBalanceExpressionForConversion (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
+    let getConversionExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
         let inbound = 
             inboundArcs
-            |> List.map (fun x -> x.Name, c.Coefficient)
+            |> List.map (fun x -> Variable x.Name, c.ConversionFactor)
         let outbound =
             outboundArcs
-            |> List.map (fun x -> x.Name, Coefficient -1.0)
-        inbound @ outbound
-        |> Map
+            |> List.map (fun x -> Variable x.Name, -1.0)
 
-    let getBalanceExpressionForMerge (inboundArcs: Arc list) (outboundArcs: Arc list) (m: Merge) =
-        let inboundTotal = inboundArcs |> List.sumBy (fun a -> a.Proportion)
+        BalanceExpr (inbound @ outbound)
+
+    let getBalanceExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (s: Split) =
         let inbound =
             inboundArcs
-            |> 
+            |> List.map (fun x -> Variable x.Name, 1.0)
+        let outbound =
+            outboundArcs
+            |> List.map (fun x -> Variable x.Name, -1.0)
         
+        BalanceExpr (inbound @ outbound)
+
+    let getTankExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (t: Tank) =
+        let inbound =
+            inboundArcs
+            |> List.map (fun x -> Variable x.Name, 1.0)
+        let outbound =
+            outboundArcs
+            |> List.map (fun x -> Variable x.Name, -1.0)
+        BalanceExpr ((Variable t.Name, -1.0) :: inbound @ outbound)
+        
+
+    let getProportionExpressions (arcs: Arc list) =
+        let expressions =
+            match arcs with
+            | [] -> invalidArg (nameof arcs) $"Cannot create Proportion Constraints when there are no arcs"
+            | [arc] -> invalidArg (nameof arcs) $"Cannot create Proportion Constraints when there is only a single arc"
+            | arc::otherArcs ->
+                otherArcs
+                |> List.map (fun otherArc -> BalanceExpr [(Variable arc.Name, arc.Proportion); (Variable otherArc.Name, arc.Proportion)])
+        
+        expressions
+        
+    let getLimitForConversion (c: Conversion) =
+        Limit (Variable c.Name, c.MaxRate)
 
     let decompose (node: Node) =
         match node with
