@@ -42,28 +42,28 @@ type Model = {
 module Variable =
     let create variable =
         if System.String.IsNullOrEmpty variable then
-            invalidArg (nameof variable) $"Cannot create Variable from null or empty string"
+            invalidArg (nameof variable) "Cannot create Variable from null or empty string"
 
         Variable variable
 
 module Coefficient =
     let create coefficient =
         if coefficient <= 0.0 then
-            invalidArg (nameof coefficient) $"Cannot have a Coefficient <= 0.0"
+            invalidArg (nameof coefficient) "Cannot have a Coefficient <= 0.0"
 
         Coefficient coefficient
 
 module Proportion =
     let create proportion =
         if proportion <= 0.0 then
-            invalidArg (nameof proportion) $"Cannot have a Proportion <= 0.0"
+            invalidArg (nameof proportion) "Cannot have a Proportion <= 0.0"
 
         Proportion proportion
 
 module MaxRate =
     let create maxRate =
         if maxRate <= 0.0 then
-            invalidArg (nameof maxRate) $"Cannot have a MaxRate <= 0.0"
+            invalidArg (nameof maxRate) "Cannot have a MaxRate <= 0.0"
 
         MaxRate maxRate
 
@@ -155,17 +155,20 @@ type Model with
     static member connect (source: Merge, dest: Sink, model: Model) =
         let s = Node.Merge source
         let d = Node.Sink dest
-        Model.sendsTo s d proportion model
+        let p = Proportion 1.0
+        Model.sendsTo s d p model
         
     static member connect (source: Merge, dest: Split, model: Model) =
         let s = Node.Merge source
         let d = Node.Split dest
-        Model.sendsTo s d proportion model
+        let p = Proportion 1.0
+        Model.sendsTo s d p model
 
     static member connect (source: Merge, dest: Tank, model: Model) =
         let s = Node.Merge source
         let d = Node.Tank dest
-        Model.sendsTo s d proportion model
+        let p = Proportion 1.0
+        Model.sendsTo s d p model
 
     static member connect (source: Source, dest: Conversion, model: Model) =
         let s = Node.Source source
@@ -208,8 +211,6 @@ type Model with
         Model.sendsTo s d p model
 
 
-
-
 let source = Source "Source1"
 let sink = Sink "Sink1"
 let process1 = {
@@ -223,3 +224,7 @@ let process2 = {
     MaxRate = MaxRate 5.0
 }
 let tank1 = Tank "Tank1"
+
+let m =
+    Model.empty
+    |> Model.connect (source, process1)
