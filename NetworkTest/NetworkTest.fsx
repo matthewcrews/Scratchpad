@@ -6,7 +6,7 @@ open Flips.SliceMap
 
 let solve () =
     let processMaxFlow = 10.0
-    let recycleMaxFlow = 4.0
+    let recycleMaxFlow = 8.0
 
     let arcs =
         DecisionBuilder "Arcs" {
@@ -32,6 +32,7 @@ let solve () =
     // Capacity Constraints
     let processCapacity = Constraint.create "ProcessCapacity" (arcs.[3] <== processMaxFlow)
     let recycleCapacity = Constraint.create "RecycleCapacity" (arcs.[7] <== recycleMaxFlow)
+    let otherCapacity = Constraint.create "OtherCapacity" (arcs.[6] <== 6.0)
 
     let constraints = [
         mergeBalance
@@ -43,6 +44,7 @@ let solve () =
         recycleBalance
         processCapacity
         recycleCapacity
+        otherCapacity
     ]
 
     let objective = Objective.create "MaxFlow" Maximize (arcs |> Map.toSeq |> Seq.map (fun (key, d) -> 1.0 * d) |> Seq.sum)
