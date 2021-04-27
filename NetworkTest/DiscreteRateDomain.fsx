@@ -14,11 +14,7 @@ type Conversion = {
 type Merge = Merge of string
 type Split = Split of string
 type Tank = Tank of string
-type Limit = {
-    Name : string
-    Variable : Variable
-    Value : float
-}
+
 [<RequireQualifiedAccess>]
 type Node =
     | Conversion of Conversion
@@ -32,11 +28,6 @@ type Arc = {
     Source : Node
     Sink : Node
     Proportion : Proportion
-}
-type Model = {
-    Nodes : Set<Node>
-    Inbound : Map<Node, Arc list>
-    Outbound : Map<Node, Arc list>
 }
 
 module Variable =
@@ -75,140 +66,126 @@ module Arc =
             Proportion = proportion
         }
 
-module Model =
+type Model (arcs: Arc list) = 
 
-    let empty =
-        {
-            Nodes = Set.empty
-            Inbound = Map.empty
-            Outbound = Map.empty
-        }
+    let nodes =
+        arcs
+        |> List.collect (fun x -> [x.Sink; x.Source])
+        |> Set
 
-    let private addNode (node: Node) (model: Model) =
-        { model with
-            Nodes = model.Nodes.Add node
-        }
+    let inbound =
+        arcs
+        |> List.groupBy (fun x -> x.Source)
+        |> Map
 
-    let private addArc (sourceNode: Node) (destNode: Node) (proportion: Proportion) (model: Model) =
-        let newArc = Arc.create sourceNode destNode proportion
-        let newInbound =
-            match Map.tryFind destNode model.Outbound with
-            | Some arcs -> model.Outbound.Add (destNode, newArc::arcs)
-            | None -> model.Outbound.Add (destNode, [newArc])
-        let newOutbound =
-            match Map.tryFind sourceNode model.Outbound with
-            | Some arcs -> model.Inbound.Add (sourceNode, newArc::arcs)
-            | None -> model.Inbound.Add (sourceNode, [newArc])
-        { model with
-            Inbound = newInbound
-            Outbound = newOutbound
-        }
+    let outbound =
+        arcs
+        |> List.groupBy (fun x -> x.Sink)
 
-    let internal sendsTo (sourceNode: Node) (destNode: Node) (proportion: Proportion) (model: Model) =
-        model
-        |> addNode sourceNode
-        |> addNode destNode
-        |> addArc sourceNode destNode proportion
+    member _.Nodes = nodes
+    member _.Inbound = inbound
+    member _.Outbound = outbound
 
-type Model with
 
-    static member connect (source: Conversion, dest: Conversion, model: Model) =
+type arc () =
+
+    static member connect (source: Conversion, dest: Conversion) =
         let s = Node.Conversion source
         let d = Node.Conversion dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Conversion, dest: Merge, proportion:Proportion, model: Model) =
+    static member connect (source: Conversion, dest: Merge, proportion:Proportion) =
         let s = Node.Conversion source
         let d = Node.Merge dest
-        Model.sendsTo s d proportion model
+        Arc.create s d proportion
 
-    static member connect (source: Conversion, dest: Sink, model: Model) =
+    static member connect (source: Conversion, dest: Sink) =
         let s = Node.Conversion source
         let d = Node.Sink dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Conversion, dest: Split, model: Model) =
+    static member connect (source: Conversion, dest: Split) =
         let s = Node.Conversion source
         let d = Node.Split dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Conversion, dest: Tank, model: Model) =
+    static member connect (source: Conversion, dest: Tank) =
         let s = Node.Conversion source
         let d = Node.Tank dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Merge, dest: Conversion, model: Model) =
+    static member connect (source: Merge, dest: Conversion) =
         let s = Node.Merge source
         let d = Node.Conversion dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Merge, dest: Merge, proportion:Proportion, model: Model) =
+    static member connect (source: Merge, dest: Merge, proportion:Proportion) =
         let s = Node.Merge source
         let d = Node.Merge dest
-        Model.sendsTo s d proportion model
+        Arc.create s d proportion
 
-    static member connect (source: Merge, dest: Sink, model: Model) =
+    static member connect (source: Merge, dest: Sink) =
         let s = Node.Merge source
         let d = Node.Sink dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
         
-    static member connect (source: Merge, dest: Split, model: Model) =
+    static member connect (source: Merge, dest: Split) =
         let s = Node.Merge source
         let d = Node.Split dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Merge, dest: Tank, model: Model) =
+    static member connect (source: Merge, dest: Tank) =
         let s = Node.Merge source
         let d = Node.Tank dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Source, dest: Conversion, model: Model) =
+    static member connect (source: Source, dest: Conversion) =
         let s = Node.Source source
         let d = Node.Conversion dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
     
-    static member connect (source: Source, dest: Merge, proportion:Proportion, model: Model) =
+    static member connect (source: Source, dest: Merge, proportion:Proportion) =
         let s = Node.Source source
         let d = Node.Merge dest
-        Model.sendsTo s d proportion model
+        Arc.create s d proportion
 
-    static member connect (source: Source, dest: Split, model: Model) =
+    static member connect (source: Source, dest: Split) =
         let s = Node.Source source
         let d = Node.Split dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Tank, dest: Conversion, model: Model) =
+    static member connect (source: Tank, dest: Conversion) =
         let s = Node.Tank source
         let d = Node.Conversion dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Tank, dest: Merge, proportion:Proportion, model: Model) =
+    static member connect (source: Tank, dest: Merge, proportion:Proportion) =
         let s = Node.Tank source
         let d = Node.Merge dest
-        Model.sendsTo s d proportion model
+        Arc.create s d proportion
 
-    static member connect (source: Tank, dest: Split, model: Model) =
+    static member connect (source: Tank, dest: Split) =
         let s = Node.Tank source
         let d = Node.Split dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
-    static member connect (source: Tank, dest: Tank, model: Model) =
+    static member connect (source: Tank, dest: Tank) =
         let s = Node.Tank source
         let d = Node.Tank dest
         let p = Proportion 1.0
-        Model.sendsTo s d p model
+        Arc.create s d p
 
 
 let source = Source "Source1"
@@ -226,5 +203,11 @@ let process2 = {
 let tank1 = Tank "Tank1"
 
 let m =
-    Model.empty
-    |> Model.connect (source, process1)
+    Model [
+        arc.connect (source, process1)
+        arc.connect (process1, tank1)
+        arc.connect (tank1, process2)
+        arc.connect (process2, sink)
+    ]
+
+m
