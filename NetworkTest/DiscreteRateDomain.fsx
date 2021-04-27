@@ -1,20 +1,28 @@
-type Variable = Variable of string
 type Coefficient = Coefficient of float
 type Proportion = Proportion of float
 type MaxRate = MaxRate of float
 
 // Node types
-type Source = Source of string
-type Sink = Sink of string
+type Source = {
+    Name : string
+}
+type Sink = {
+    Name : string
+}
 type Conversion = {
     Name : string
     Coefficient : Coefficient
     MaxRate : MaxRate
 }
-type Merge = Merge of string
-type Split = Split of string
-type Tank = Tank of string
-
+type Merge = {
+    Name : string
+}
+type Split = {
+    Name : string
+}
+type Tank = {
+    Name : string
+}
 [<RequireQualifiedAccess>]
 type Node =
     | Conversion of Conversion
@@ -23,12 +31,24 @@ type Node =
     | Source of Source
     | Split of Split
     | Tank of Tank
+    with
+        member this.Name =
+            match this with
+            | Conversion c -> c.Name
+            | Merge m -> m.Name
+            | Sink s -> s.Name
+            | Source s -> s.Name
+            | Split s -> s.Name
+            | Tank t -> t.Name
 
 type Arc = {
     Source : Node
     Sink : Node
     Proportion : Proportion
-}
+} with
+    member this.Name =
+        $"{this.Source.Name}->{this.Sink.Name}"
+
 
 module Variable =
     let create variable =
@@ -188,8 +208,8 @@ type arc () =
         Arc.create s d p
 
 
-let source = Source "Source1"
-let sink = Sink "Sink1"
+let source : Source = { Name = "Source1" }
+let sink : Sink = { Name = "Sink1" }
 let process1 = {
     Name = "Process1"
     Coefficient = Coefficient 1.0
@@ -200,7 +220,7 @@ let process2 = {
     Coefficient = Coefficient 1.0
     MaxRate = MaxRate 5.0
 }
-let tank1 = Tank "Tank1"
+let tank1 : Tank = { Name = "Tank1" }
 
 let m =
     Model [
@@ -211,3 +231,50 @@ let m =
     ]
 
 m
+
+#r "nuget: MathNet.Numerics.FSharp, 4.15.0"
+
+module Solver =
+
+    open MathNet.Numerics.LinearAlgebra
+    
+    type Variable = Variable of string
+    type LinExpr = Map<Variable, Coefficient>
+
+    let getBalanceExpressionForConversion (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
+        let inbound = 
+            inboundArcs
+            |> List.map (fun x -> x.Name, c.Coefficient)
+        let outbound =
+            outboundArcs
+            |> List.map (fun x -> x.Name, Coefficient -1.0)
+        inbound @ outbound
+        |> Map
+
+    let getBalanceExpressionForMerge (inboundArcs: Arc list) (outboundArcs: Arc list) (m: Merge) =
+        let inboundTotal = inboundArcs |> List.sumBy (fun a -> a.Proportion)
+        let inbound =
+            inboundArcs
+            |> 
+        
+
+    let decompose (node: Node) =
+        match node with
+        | Node.Sink _ | Node.Source _ -> []
+        | Node.Conversion c -> 
+
+    let solve (model: Model) =
+
+        // Create a map to track Arc to variable
+        let arcToIdx = System.Collections.Generic.Dictionary()
+        let tankToIdx = System.Collections.Generic.Dictionary()
+
+        let mutable lastVarIdx = 0
+        let mutable rowIdx = 0
+
+        // Create a map to track Tank to variable
+        for node in model.Nodes do
+        
+            
+
+            rowIdx <- rowIdx + 1
