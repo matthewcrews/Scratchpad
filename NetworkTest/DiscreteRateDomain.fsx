@@ -64,6 +64,19 @@ type Node =
             | Split s -> s.Name
             | Tank t -> t.Name
 
+module Node =
+
+    let isSourceOrSink (n: Node) =
+        match n with
+        | Node.Source _ | Node.Sink _ -> true
+        | _ -> false
+
+    let isConversion (n: Node) =
+        match n with
+        | Node.Conversion _ -> true
+        | _ -> false
+
+
 type Arc = {
     Source : Node
     Sink : Node
@@ -119,6 +132,7 @@ type Model (arcs: Arc list) =
     let outbound =
         arcs
         |> List.groupBy (fun x -> x.Sink)
+        |> Map
 
     member _.Nodes = nodes
     member _.Inbound = inbound
@@ -228,18 +242,9 @@ type arc () =
 
 let source : Source = { Name = "Source1" }
 let sink : Sink = { Name = "Sink1" }
-let process1 = {
-    Name = "Process1"
-    ConversionFactor = 1.0
-    MaxRate = 10.0
-}
-let process2 = {
-    Name = "Process2"
-    ConversionFactor = 1.0
-    MaxRate = 5.0
-}
+let process1 = Conversion.create "Process1" 1.0 10.0
+let process2 = Conversion.create "Process2" 1.0 5.0
 let tank1 : Tank = { Name = "Tank1" }
-
 let m =
     Model [
         arc.connect (source, process1)
@@ -257,10 +262,11 @@ module Solver =
     open MathNet.Numerics.LinearAlgebra
     
     type Variable = Variable of string
+    type ConversionExpr = ConversionExpr of List<Variable * float>
     type BalanceExpr = BalanceExpr of List<Variable * float>
     type Limit = Limit of variable:Variable * value:float
 
-    let getConversionExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
+    let private getConversionExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
         let inbound = 
             inboundArcs
             |> List.map (fun x -> Variable x.Name, c.ConversionFactor)
@@ -268,9 +274,9 @@ module Solver =
             outboundArcs
             |> List.map (fun x -> Variable x.Name, -1.0)
 
-        BalanceExpr (inbound @ outbound)
+        ConversionExpr (inbound @ outbound)
 
-    let getBalanceExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (s: Split) =
+    let private getBalanceExpression (inboundArcs: Arc list) (outboundArcs: Arc list) =
         let inbound =
             inboundArcs
             |> List.map (fun x -> Variable x.Name, 1.0)
@@ -280,7 +286,7 @@ module Solver =
         
         BalanceExpr (inbound @ outbound)
 
-    let getTankExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (t: Tank) =
+    let private getTankExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (t: Tank) =
         let inbound =
             inboundArcs
             |> List.map (fun x -> Variable x.Name, 1.0)
@@ -290,7 +296,7 @@ module Solver =
         BalanceExpr ((Variable t.Name, -1.0) :: inbound @ outbound)
         
 
-    let getProportionExpressions (arcs: Arc list) =
+    let private getProportionExpressions (arcs: Arc list) =
         let expressions =
             match arcs with
             | [] -> invalidArg (nameof arcs) $"Cannot create Proportion Constraints when there are no arcs"
@@ -301,15 +307,51 @@ module Solver =
         
         expressions
         
-    let getLimitForConversion (c: Conversion) =
+    let private getLimitForConversion (c: Conversion) =
         Limit (Variable c.Name, c.MaxRate)
 
-    let decompose (node: Node) =
-        match node with
-        | Node.Sink _ | Node.Source _ -> []
-        | Node.Conversion c -> 
+    let private getExpressions (m: Model) (n: Node) =
+        match n with
+        | Node.Conversion conversion -> 
+            let conversions = getConversionExpression m.Inbound.[n] m.Outbound.[n] conversion
+            let limit = getLimitForConversion conversion
+            [conversions, limit], []
+        | Node.Merge merge -> 
+            let balances = 
+                getBalanceExpression m.Inbound.[n] m.Outbound.[n]
+                :: getProportionExpressions m.Inbound.[n]
+            [], balances
+        | Node.Split split -> 
+            let balances = 
+                getBalanceExpression m.Inbound.[n] m.Outbound.[n]
+                :: getProportionExpressions m.Outbound.[n]
+            [], balances
+        | Node.Tank tank -> 
+            let balances = [getTankExpression m.Inbound.[n] m.Outbound.[n] tank]
+            [], balances
+        | _ ->
+            [], []
+
+    let private decompose (model: Model) =
+
+        let conversionLimits, balances =
+            model.Nodes
+            |> Seq.map (getExpressions model)
+            |> Seq.fold (fun (cl, b) (newCL, newB) -> newCL@cl, newB@b) ([], [])
+
+        conversionLimits, balances
+
 
     let solve (model: Model) =
+
+        let conversionLimits, balances = decompose model
+
+        let (pivotConversion, pivotLimit), remainingConversionLimits = 
+            match conversionLimits with
+            | [] -> invalidArg (nameof model) "Unbounded model. There must be at least 1 Conversion in the network otherwise there is unlimited flow."
+            | head::tail -> head, tail
+
+
 
         // Create a map to track Arc to variable
         let arcToIdx = System.Collections.Generic.Dictionary()
