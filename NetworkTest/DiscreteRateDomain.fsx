@@ -347,7 +347,7 @@ module Solver =
                 varToIdx.Add(outboundVar, nextColIdx)
                 idxToVar.Add(nextColIdx, outboundVar)
                 nextColIdx <- nextColIdx + 1
-            A.[rowIdx, varToIdx.[outboundVar]] <- 1.0
+            A.[rowIdx, varToIdx.[outboundVar]] <- -1.0
 
             // Add balance row
             
@@ -433,10 +433,29 @@ module Solver =
             
             // This needs to be expanded to deal with proportional constraints
 
+        // Add rows for Conversions
+        for KeyValue(conversion, (inboundArc, outboundArc)) in model.Conversion do
+            
+            // Add limit row
+            let outboundVar = Variable.ofArc outboundArc
+            let outboundSlackVar = Variable.slackFor outboundArc
+            if not (varToIdx.ContainsKey outboundSlackVar) then
+                varToIdx.Add(outboundSlackVar, nextColIdx)
+                idxToVar.Add(nextColIdx, outboundSlackVar)
+                nextColIdx <- nextColIdx + 1
+
+            A.[rowIdx, varToIdx.[outboundVar]] <- 1.0
+            A.[rowIdx, varToIdx.[outboundSlackVar]] <- 1.0
+            b.[rowIdx] <- conversion.MaxRate
+            x.[varToIdx.[outboundSlackVar]] <- conversion.MaxRate
+
+            rowIdx <- rowIdx + 1
+
 
         A, x, b, varToIdx, idxToVar
 
     let swapColumns (targetCol: int) (sourceCol: int) (A: Matrix<float>, x:Vector<float>, varToIdx:System.Collections.Generic.Dictionary<_,_>, idxToVar:System.Collections.Generic.Dictionary<_,_>) =
+        printfn $"Swapping: {targetCol} with {sourceCol}"
         if targetCol <> sourceCol then
             let temp = A.[*, targetCol]
             A.[*, targetCol] <- A.[*, sourceCol]
@@ -444,9 +463,11 @@ module Solver =
 
             let sourceColVar = idxToVar.[sourceCol]
             let targetColVar = idxToVar.[targetCol]
+
             // Update varToIdx
             varToIdx.[sourceColVar] <- targetCol
             varToIdx.[targetColVar] <- sourceCol
+
             // Update idxToVar
             idxToVar.[targetCol] <- sourceColVar
             idxToVar.[sourceCol] <- targetColVar
@@ -461,7 +482,7 @@ module Solver =
     let arrangeForSolve (model: Model) (A: Matrix<float>, x:Vector<float>, b:Vector<float>, varToIdx:System.Collections.Generic.Dictionary<_,_>, idxToVar:System.Collections.Generic.Dictionary<_,_>) =
         // Move outbound column to the edge of what will become the Basis, B
         let (_, (_, outbound)) = model.Conversion |> Map.toSeq |> Seq.head
-        let targetCol = A.RowCount
+        let targetCol = 0
         let slackVar = Variable.slackFor outbound
         let sourceCol = varToIdx.[slackVar]
 
@@ -470,9 +491,10 @@ module Solver =
 
         let flowVar = Variable.ofArc outbound
         let sourceCol = varToIdx.[flowVar]
-        let targetCol = 0
+        let targetCol = A.RowCount
+        printfn $"Source: {sourceCol} Target: {targetCol}"
         // Make sure our entering variable is in the right place
-        let A, x, varToIdx, idxToVar = swapColumns targetCol sourceCol (A, x, varToIdx, idxToVar)
+        let A, x, varToIdx, idxToVar = swapColumns sourceCol targetCol (A, x, varToIdx, idxToVar)
 
         A, x, b, varToIdx, idxToVar
         
@@ -483,14 +505,19 @@ module Solver =
             buildInitialSystem model
             |> arrangeForSolve model
 
-        let B = A.[*, 1..A.RowCount]
-        let u = B.Solve A.[*, 0] // We arranged for this to work
-        let theta = x.[A.RowCount] / u.[u.Count - 1] // This will always be theta due to the arrangement
-        let newX = x.[1..A.RowCount] - theta * u
-        newX.[A.RowCount] <- theta
+        let B = A.[*, 0..A.RowCount-1]
+        let u = B.Solve A.[*, A.RowCount] // We arranged for this to work
+        x, u
+        //let theta = x.[0] / u.[0]
+        //let newX = x.[0..A.RowCount - 1] - theta * u
+        //newX.[0] <- theta
+        //newX
+        //let theta = x.[A.RowCount] / u.[u.Count - 1] // This will always be theta due to the arrangement
+        //let newX = x.[1..A.RowCount] - theta * u
+        //newX.[A.RowCount] <- theta
 
-        varToIdx
-        |> Seq.map (fun (KeyValue(variable, _)) -> variable, newX.[varToIdx.[variable]])
+        //varToIdx
+        //|> Seq.map (fun (KeyValue(variable, _)) -> variable, newX.[varToIdx.[variable]])
 
 
 let source : Source = { Name = "Source1" }
@@ -507,7 +534,37 @@ let m =
     ]
 
 let s = Solver.solve m
+s
 
+let A, x, b, varToIdx, idxToVar = Solver.buildInitialSystem m
+let A, x, varToIdx, idxToVar = Solver.swapColumns 0 2 (A, x, varToIdx, idxToVar)
+A
+x
+b
+let A, x, varToIdx, idxToVar = Solver.swapColumns 5 1 (A, x, varToIdx, idxToVar)
+A
+x
+b
+let A, x, b, varToIdx, idxToVar = Solver.arrangeForSolve m (A, x, b, varToIdx, idxToVar)
+A
+x
+b
+
+
+let B = A.[*, 0..A.RowCount-1]
+let u = B.Solve A.[*, A.RowCount] 
+x.[..A.RowCount - 1] / u
+//let theta = x.[0] / u.[0]
+let theta = 5.0
+let newX = x.[..A.RowCount - 1] - theta * u
+
+(*
+1  1  0   0  0  0   0
+0  1  1   0  0  0   0
+0  0  0   1  1  0   0
+0  0  0   0  1  1   0
+0  1  0  -1  0  0  -1
+*)
 //let (A, x, b, varToIdx, idxToVar) = Solver.buildInitialSystem m
 //b
 //A * x
