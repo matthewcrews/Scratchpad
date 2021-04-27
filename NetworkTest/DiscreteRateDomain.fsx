@@ -240,20 +240,7 @@ type arc () =
         Arc.create s d p
 
 
-let source : Source = { Name = "Source1" }
-let sink : Sink = { Name = "Sink1" }
-let process1 = Conversion.create "Process1" 1.0 10.0
-let process2 = Conversion.create "Process2" 1.0 5.0
-let tank1 : Tank = { Name = "Tank1" }
-let m =
-    Model [
-        arc.connect (source, process1)
-        arc.connect (process1, tank1)
-        arc.connect (tank1, process2)
-        arc.connect (process2, sink)
-    ]
 
-m
 
 #r "nuget: MathNet.Numerics.FSharp, 4.15.0"
 
@@ -261,39 +248,71 @@ module Solver =
 
     open MathNet.Numerics.LinearAlgebra
     
-    type Variable = Variable of string
-    type ConversionExpr = ConversionExpr of List<Variable * float>
-    type BalanceExpr = BalanceExpr of List<Variable * float>
-    type Limit = Limit of variable:Variable * value:float
+    type private Variable = Variable of string
+        with
+        member this.Value =
+            let (Variable value) = this
+            value
+
+    type private Term = {
+        Variable : Variable
+        Coefficient : float
+    }
+
+    module private Term =
+        let create variable coefficient =
+            if System.String.IsNullOrEmpty variable then
+                invalidArg (nameof variable) $"{nameof variable} cannot be null or empty"
+            {
+                Variable = Variable variable
+                Coefficient = coefficient
+            }
+
+    type private ConversionExpr = ConversionExpr of List<Term>
+    type private BalanceExpr = BalanceExpr of List<Term>
+    type private Limit = {
+        Variable : Variable
+        Value : float
+    }
+
+    module private Limit =
+
+        let create (variable: string) value =
+            if System.String.IsNullOrEmpty variable then
+                invalidArg (nameof variable) $"{nameof variable} cannot be null or empty"
+            {
+                Variable = Variable variable
+                Value = value
+            }
 
     let private getConversionExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (c: Conversion) =
         let inbound = 
             inboundArcs
-            |> List.map (fun x -> Variable x.Name, c.ConversionFactor)
+            |> List.map (fun x -> Term.create x.Name c.ConversionFactor)
         let outbound =
             outboundArcs
-            |> List.map (fun x -> Variable x.Name, -1.0)
+            |> List.map (fun x -> Term.create x.Name -1.0)
 
         ConversionExpr (inbound @ outbound)
 
     let private getBalanceExpression (inboundArcs: Arc list) (outboundArcs: Arc list) =
         let inbound =
             inboundArcs
-            |> List.map (fun x -> Variable x.Name, 1.0)
+            |> List.map (fun x -> Term.create x.Name 1.0)
         let outbound =
             outboundArcs
-            |> List.map (fun x -> Variable x.Name, -1.0)
+            |> List.map (fun x -> Term.create x.Name -1.0)
         
         BalanceExpr (inbound @ outbound)
 
     let private getTankExpression (inboundArcs: Arc list) (outboundArcs: Arc list) (t: Tank) =
         let inbound =
             inboundArcs
-            |> List.map (fun x -> Variable x.Name, 1.0)
+            |> List.map (fun x -> Term.create x.Name 1.0)
         let outbound =
             outboundArcs
-            |> List.map (fun x -> Variable x.Name, -1.0)
-        BalanceExpr ((Variable t.Name, -1.0) :: inbound @ outbound)
+            |> List.map (fun x -> Term.create x.Name -1.0)
+        BalanceExpr ((Term.create t.Name -1.0) :: inbound @ outbound)
         
 
     let private getProportionExpressions (arcs: Arc list) =
@@ -303,12 +322,12 @@ module Solver =
             | [arc] -> invalidArg (nameof arcs) $"Cannot create Proportion Constraints when there is only a single arc"
             | arc::otherArcs ->
                 otherArcs
-                |> List.map (fun otherArc -> BalanceExpr [(Variable arc.Name, arc.Proportion); (Variable otherArc.Name, arc.Proportion)])
+                |> List.map (fun otherArc -> BalanceExpr [(Term.create arc.Name arc.Proportion); (Term.create otherArc.Name arc.Proportion)])
         
         expressions
         
     let private getLimitForConversion (c: Conversion) =
-        Limit (Variable c.Name, c.MaxRate)
+        Limit.create c.Name c.MaxRate
 
     let private getExpressions (m: Model) (n: Node) =
         match n with
@@ -346,23 +365,183 @@ module Solver =
 
         let conversionLimits, balances = decompose model
 
-        let (pivotConversion, pivotLimit), remainingConversionLimits = 
+        let (ConversionExpr pivotConversion, pivotLimit), remainingConversionLimits = 
             match conversionLimits with
             | [] -> invalidArg (nameof model) "Unbounded model. There must be at least 1 Conversion in the network otherwise there is unlimited flow."
             | head::tail -> head, tail
 
+        let remainingConversions, remainingLimits =
+            remainingConversionLimits
+            |> List.fold (fun (c, l) (newC, newL) -> newC::c, newL::l) ([], [])
 
+        // Create a map to track variable mapping
+        let varToIdx = System.Collections.Generic.Dictionary()
+        let idxToVar = System.Collections.Generic.Dictionary()
 
-        // Create a map to track Arc to variable
-        let arcToIdx = System.Collections.Generic.Dictionary()
-        let tankToIdx = System.Collections.Generic.Dictionary()
-
-        let mutable lastVarIdx = 0
+        let mutable nextColIdx = 0
         let mutable rowIdx = 0
+        let totalRows = 
+            2 + // For the special Pivot Conversion row and PivotLimit
+            remainingConversions.Length +
+            remainingLimits.Length +
+            balances.Length
 
-        // Create a map to track Tank to variable
-        for node in model.Nodes do
-        
+        let bVector = vector [0.0..float (totalRows - 1)]
+
+        let firstRow =
+            let pivotTerms, remainingTerms =
+                pivotConversion
+                |> List.partition (fun term -> pivotLimit.Variable = term.Variable)
+
+            let pivotTerm =
+                match pivotTerms with
+                | [term] -> term
+                | _ -> invalidArg (nameof model) $"Cannot find pivot term for model"
+
+            varToIdx.Add(pivotTerm.Variable, nextColIdx)
+            idxToVar.Add(nextColIdx, pivotTerm.Variable)
+            nextColIdx <- nextColIdx + 1
+            let firstElement = [(rowIdx, varToIdx.[pivotTerm.Variable]), pivotTerm.Coefficient]
+
+            let remainingElements =
+                remainingTerms
+                |> List.collect (fun term ->
+                    varToIdx.Add(pivotTerm.Variable, nextColIdx)
+                    idxToVar.Add(nextColIdx, pivotTerm.Variable)
+                    nextColIdx <- nextColIdx + 1
+                    [(rowIdx, varToIdx.[term.Variable]), term.Coefficient]
+                )
+
+            firstElement@remainingElements
             
+        rowIdx <- rowIdx + 1
 
-            rowIdx <- rowIdx + 1
+        let remainingConversionRows =
+            remainingConversions
+            |> List.collect (fun (ConversionExpr terms) ->
+                let newRow =
+                    terms
+                    |> List.collect (fun term ->
+                        match varToIdx.TryGetValue term.Variable with
+                        | true, varIdx -> 
+                            [(rowIdx, varToIdx.[term.Variable]), term.Coefficient]
+                        | fale, _ ->
+                            varToIdx.Add(term.Variable, nextColIdx)
+                            idxToVar.Add(nextColIdx, term.Variable)
+                            nextColIdx <- nextColIdx + 1
+                            [(rowIdx, varToIdx.[term.Variable]), term.Coefficient]
+                    )
+                rowIdx <- rowIdx + 1
+                newRow
+            )
+
+        let balanceRows =
+            balances
+            |> List.collect (fun (BalanceExpr terms) ->
+                let newRow =
+                    terms
+                    |> List.collect (fun term ->
+                        match varToIdx.TryGetValue term.Variable with
+                        | true, varIdx -> 
+                            [(rowIdx, varToIdx.[term.Variable]), term.Coefficient]
+                        | fale, _ ->
+                            varToIdx.Add(term.Variable, nextColIdx)
+                            idxToVar.Add(nextColIdx, term.Variable)
+                            nextColIdx <- nextColIdx + 1
+                            [(rowIdx, varToIdx.[term.Variable]), term.Coefficient]
+                    )
+                rowIdx <- rowIdx + 1
+                newRow
+            )
+
+        let limitSplitIdx =
+            totalRows - 1 - // For the first row
+            remainingConversions.Length -
+            balances.Length
+
+        let prePivotLimits = remainingLimits.[..limitSplitIdx - 1]
+        let postPivotLimits = remainingLimits.[limitSplitIdx..]
+
+        let prePivotRows =
+            prePivotLimits
+            |> List.collect (fun limit ->
+                let newRow =
+                    match varToIdx.TryGetValue limit.Variable with
+                    | true, varIdx -> 
+                        let slackVar = Variable.Variable $"{limit.Variable.Value}_slack"
+                        varToIdx.Add(slackVar, nextColIdx)
+                        idxToVar.Add(nextColIdx, slackVar)
+                        nextColIdx <- nextColIdx + 1
+                        bVector.[rowIdx] <- limit.Value
+                        [(rowIdx, varToIdx.[limit.Variable]), 1.0; (rowIdx, varToIdx.[slackVar]), 1.0]
+
+                    | fale, _ ->
+                        invalidArg (nameof limit) $"Variables for limits should already exist"
+                rowIdx <- rowIdx + 1
+                newRow
+            )
+
+        // Pivot here
+        let pivotSlackVar = Variable.Variable $"{pivotLimit.Variable.Value}_slack"
+        varToIdx.Add(pivotSlackVar, nextColIdx)
+        idxToVar.Add(nextColIdx, pivotSlackVar)
+        nextColIdx <- nextColIdx + 1
+        bVector.[rowIdx] <- pivotLimit.Value
+        let pivotRow = [(rowIdx, varToIdx.[pivotLimit.Variable]), 1.0; (rowIdx, varToIdx.[pivotSlackVar]), 1.0]
+
+        let postPivotRows =
+            postPivotLimits
+            |> List.collect (fun limit ->
+                let newRow =
+                    match varToIdx.TryGetValue limit.Variable with
+                    | true, varIdx -> 
+                        let slackVar = Variable.Variable $"{limit.Variable.Value}_slack"
+                        varToIdx.Add(slackVar, nextColIdx)
+                        idxToVar.Add(nextColIdx, slackVar)
+                        nextColIdx <- nextColIdx + 1
+                        bVector.[rowIdx] <- limit.Value
+                        [(rowIdx, varToIdx.[limit.Variable]), 1.0; (rowIdx, varToIdx.[slackVar]), 1.0]
+
+                    | fale, _ ->
+                        invalidArg (nameof limit) $"Variables for limits should already exist"
+                rowIdx <- rowIdx + 1
+                newRow
+            )
+
+        let aMatrix = DenseMatrix.zero<float> rowIdx nextColIdx
+
+        for ((row, col), value) in firstRow do
+            aMatrix.[row, col] <- value
+
+        for ((row, col), value) in remainingConversionRows do
+            aMatrix.[row, col] <- value
+
+        for ((row, col), value) in balanceRows do
+            aMatrix.[row, col] <- value
+
+        for ((row, col), value) in prePivotRows do
+            aMatrix.[row, col] <- value
+
+        for ((row, col), value) in pivotRow do
+            aMatrix.[row, col] <- value
+
+        for ((row, col), value) in postPivotRows do
+            aMatrix.[row, col] <- value
+
+        aMatrix, bVector
+
+
+let source : Source = { Name = "Source1" }
+let sink : Sink = { Name = "Sink1" }
+let process1 = Conversion.create "Process1" 1.0 10.0
+let process2 = Conversion.create "Process2" 1.0 5.0
+let tank1 : Tank = { Name = "Tank1" }
+let m =
+    Model [
+        arc.connect (source, process1)
+        arc.connect (process1, tank1)
+        arc.connect (tank1, process2)
+        arc.connect (process2, sink)
+    ]
+
+let (testA, testB) = Solver.solve m
