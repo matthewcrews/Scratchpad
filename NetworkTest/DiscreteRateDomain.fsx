@@ -112,7 +112,7 @@ module Arc =
             Proportion = proportion
         }
 
-type Model (arcs: Arc list) = 
+type Model (arcs: Arc list) =
 
     let nodes =
         arcs
@@ -134,11 +134,11 @@ type Model (arcs: Arc list) =
         |> Seq.fold (fun (conversionArcs, tankArcs, mergeArcs, splitArcs) node ->
             match node with
             | Node.Conversion conversion ->
-                let inbound = 
+                let inbound =
                     match inboundArcs.[node] with
                     | [arc] -> arc
                     | _ -> invalidArg "Inbound" "Cannot have Conversion with more than one input"
-                let outbound = 
+                let outbound =
                     match outboundArcs.[node] with
                     | [arc] -> arc
                     | _ -> invalidArg "Inbound" "Cannot have Conversion with more than one output"
@@ -146,14 +146,14 @@ type Model (arcs: Arc list) =
                 newConversionArcs, tankArcs, mergeArcs, splitArcs
             | Node.Merge merge ->
                 let inbound = inboundArcs.[node]
-                let outbound = 
+                let outbound =
                     match outboundArcs.[node] with
                     | [arc] -> arc
                     | _ -> invalidArg "Inbound" "Cannot have Merge with more than one output"
                 let newMerge = Map.add merge (inbound, outbound) mergeArcs
                 conversionArcs, tankArcs, newMerge, splitArcs
             | Node.Split split ->
-                let inbound = 
+                let inbound =
                     match inboundArcs.[node] with
                     | [arc] -> arc
                     | _ -> invalidArg "Inbound" "Cannot have Split with more than one input"
@@ -165,7 +165,7 @@ type Model (arcs: Arc list) =
                 let outbound = outboundArcs.[node]
                 let newTank = Map.add tank (inbound, outbound) tankArcs
                 conversionArcs, newTank, mergeArcs, splitArcs
-            | _ -> 
+            | _ ->
                 conversionArcs, tankArcs, mergeArcs, splitArcs
         ) (Map.empty, Map.empty, Map.empty<Merge, (Arc list * Arc)>, Map.empty)
 
@@ -224,7 +224,7 @@ type arc () =
         let d = Node.Sink dest
         let p = 1.0
         Arc.create s d p
-        
+
     static member connect (source: Merge, dest: Split) =
         let s = Node.Merge source
         let d = Node.Split dest
@@ -242,7 +242,7 @@ type arc () =
         let d = Node.Conversion dest
         let p = 1.0
         Arc.create s d p
-    
+
     static member connect (source: Source, dest: Merge, proportion:float) =
         let s = Node.Source source
         let d = Node.Merge dest
@@ -301,7 +301,7 @@ module Solver =
         let varToIdx = System.Collections.Generic.Dictionary<Variable, int>()
         let idxToVar = System.Collections.Generic.Dictionary<int, Variable>()
 
-        let colCount = 
+        let colCount =
             model.Arcs.Count + // A variable for each Flow rate
             model.Tank.Count + // There is a variable for the accumulation rate in the tank
             1 // The one Slack you will need
@@ -376,7 +376,7 @@ module Solver =
                 nextColIdx <- nextColIdx + 1
             A.[rowIdx, varToIdx.[outboundVar]] <- -1.0
             // This needs to be expanded to deal with proportional constraints
-            
+
             rowIdx <- rowIdx + 1
 
         // Add Split rows
@@ -395,7 +395,7 @@ module Solver =
                     idxToVar.Add(nextColIdx, variable)
                     nextColIdx <- nextColIdx + 1
                 A.[rowIdx, varToIdx.[variable]] <- -1.0
-            
+
             // This needs to be expanded to deal with proportional constraints
             rowIdx <- rowIdx + 1
 
@@ -459,25 +459,30 @@ module Solver =
         let A, varToIdx, idxToVar = swapColumns sourceCol targetCol (A, varToIdx, idxToVar)
 
         A, b, varToIdx, idxToVar
-        
+
 
     let solve (model: Model) =
 
-        let A, b, varToIdx, idxToVar = 
+        let A, b, varToIdx, idxToVar =
             buildInitialSystem model
             |> arrangeForSolve model
 
         let B = A.[*, 0..A.RowCount-1]
         let x = B.Solve b
-        let u = B.Solve A.[*, A.RowCount] 
+        let u = B.Solve A.[*, A.RowCount]
         let theta = x.[0] / u.[0]
         let newX = x - theta * u
         newX.[0] <- theta
 
-        newX, varToIdx
-        // varToIdx
-        // |> Seq.map (fun (KeyValue(variable, idx)) -> variable, newX.[idx])
-        // |> List.ofSeq
+        // Swap indexes
+        let tempIdx = varToIdx.[idxToVar.[0]]
+        varToIdx.[idxToVar.[0]] <- varToIdx.[idxToVar.[A.ColumnCount - 1]]
+        varToIdx.[idxToVar.[A.ColumnCount - 1]] <- tempIdx
+
+        // newX, varToIdx, idxToVar
+        varToIdx
+        |> Seq.map (fun (KeyValue(variable, idx)) -> if idx < newX.Count - 1 then variable, newX.[idx] else variable, 0.0)
+        |> List.ofSeq
 
 
 let source : Source = { Name = "Source1" }
@@ -493,6 +498,38 @@ let m =
         arc.connect (process2, sink)
     ]
 
-let x, v = Solver.solve m
+// let x, varToIdx, idxToVar = Solver.solve m
+// x
+// varToIdx
+
+// let a = 
+//     varToIdx
+//     |> Seq.filter 
+//     |> Seq.map (fun (KeyValue(variable, idx)) -> variable, x.[idx])
+//     |> List.ofSeq
+
+let x = Solver.solve m
 x
-v
+// let tempIdx = varToIdx.[idxToVar.[0]]
+// varToIdx.[idxToVar.[0]] <- varToIdx.[idxToVar.[A.RowCount - 1]]
+// varToIdx.[idxToVar.[A.RowCount - 1]] <- tempIdx
+
+(*
+> v;;
+val it : System.Collections.Generic.Dictionary<Solver.Variable,int> =
+  dict
+    [(Variable "Source1->Process1_Flow", 1);
+     (Variable "Process1->Tank1_Flow", 5);
+     (Variable "Tank1->Process2_Flow", 2);
+     (Variable "Process2->Sink1_Flow", 3); (Variable "Tank1_Accumulation", 4);
+     (Variable "Process1->Tank1_<Slack>", 0)]
+
+> i;;
+val it : System.Collections.Generic.Dictionary<int,Solver.Variable> =
+  dict
+    [(0, Variable "Process1->Tank1_<Slack>");
+     (1, Variable "Source1->Process1_Flow");
+     (2, Variable "Tank1->Process2_Flow");
+     (3, Variable "Process2->Sink1_Flow"); (4, Variable "Tank1_Accumulation");
+     (5, Variable "Process1->Tank1_Flow")]
+*)
