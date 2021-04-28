@@ -408,7 +408,7 @@ module Solver =
                 A.[rowIdx, varToIdx.[outboundVar]] <- 1.0
                 b.[rowIdx] <- conversion.MaxRate
 
-                if rowIdx < rowCount - 1 then // Yes, I know strange
+                if nextColIdx < colCount then // Yes, I know strange
                     let outboundSlackVar = Variable.slackFor outboundArc
                     if not (varToIdx.ContainsKey outboundSlackVar) then
                         varToIdx.Add(outboundSlackVar, nextColIdx)
@@ -418,7 +418,6 @@ module Solver =
                     A.[rowIdx, varToIdx.[outboundSlackVar]] <- 1.0
 
                 rowIdx <- rowIdx + 1
-
 
         A, b, varToIdx, idxToVar
 
@@ -488,16 +487,26 @@ module Solver =
 let source : Source = { Name = "Source1" }
 let sink : Sink = { Name = "Sink1" }
 let process1 = Conversion.create "Process1" 1.0 10.0
-let process2 = Conversion.create "Process2" 1.0 5.0
 let tank1 : Tank = { Name = "Tank1" }
-let m =
+let process2 = Conversion.create "Process2" 1.0 5.0
+
+let tank2 : Tank = { Name = "Tank2"}
+let process3 = Conversion.create "Process3" 1.0 7.0
+
+let model =
     Model [
         arc.connect (source, process1)
         arc.connect (process1, tank1)
         arc.connect (tank1, process2)
-        arc.connect (process2, sink)
+        arc.connect (process2, tank2)
+        arc.connect (tank2, process3)
+        arc.connect (process3, sink)
     ]
 
+fsi.AddPrinter<Arc>(fun arc -> arc.Name)
+
+let z = Solver.buildInitialSystem model
+let s = Solver.solve model
 // let x, varToIdx, idxToVar = Solver.solve m
 // x
 // varToIdx
@@ -508,8 +517,8 @@ let m =
 //     |> Seq.map (fun (KeyValue(variable, idx)) -> variable, x.[idx])
 //     |> List.ofSeq
 
-let x = Solver.solve m
-x
+// let x = Solver.solve m
+// x
 // let tempIdx = varToIdx.[idxToVar.[0]]
 // varToIdx.[idxToVar.[0]] <- varToIdx.[idxToVar.[A.RowCount - 1]]
 // varToIdx.[idxToVar.[A.RowCount - 1]] <- tempIdx
