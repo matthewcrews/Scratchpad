@@ -23,14 +23,14 @@ let cities = [
 ]
 
 let demand = 
-  readOnlyDict [
+  Map [
     City "Portland",    10_000.0
     City "Seattle",     15_000.0
     City "Los Angeles", 18_000.0
   ]
 
 let capacity = 
-  readOnlyDict [
+  Map [
     Truck "TruckA", 7_000.0
     Truck "TruckB", 9_000.0
     Truck "TruckC", 7_000.0
@@ -41,7 +41,7 @@ let capacity =
   ]
 
 let costs = 
-  readOnlyDict [
+  Map [
     (City "Portland"    , Truck "TruckA"), 12_000.0
     (City "Portland"    , Truck "TruckB"), 13_000.0
     (City "Portland"    , Truck "TruckC"), 13_000.0
@@ -84,7 +84,7 @@ let cityDemandConstraints =
   ConstraintBuilder "CityDemand" {
     for c in cities ->
       let totalSupply = 
-        List.sum [for t in trucks -> capacity.[t] * assignment.[t, c]] // This is wrong indexing
+        List.sum [for t in trucks -> capacity.[t] * assignment.[c, t]]
       totalSupply >== demand.[c]
   }
 

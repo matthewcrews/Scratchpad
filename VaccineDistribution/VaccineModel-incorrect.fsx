@@ -21,14 +21,14 @@ let cities = [
 ]
 
 let demand = 
-  readOnlyDict [
+  Map [
     "Portland",    10_000.0
     "Seattle",     15_000.0
     "Los Angeles", 18_000.0
   ]
 
 let capacity = 
-  readOnlyDict [
+  Map [
     "TruckA", 7_000.0
     "TruckB", 9_000.0
     "TruckC", 7_000.0
@@ -39,7 +39,7 @@ let capacity =
   ]
 
 let costs = 
-  readOnlyDict [
+  Map [
     ("Portland"  , "TruckA"),   12_000.0
     ("Portland"  , "TruckB"),   13_000.0
     ("Portland"  , "TruckC"),   13_000.0
@@ -70,19 +70,25 @@ let assignment =
       Boolean
   } |> Map
 
-let singleAssignmentConstraints =
+let truckAssignedOnceConstraints =
   ConstraintBuilder "SingleAssignment" {
     for t in trucks ->
       let totalAssignments = 
-        List.sum [for c in cities -> 1.0 * assignment.[t, c]]
+        List.sum 
+          [for c in cities -> 
+            1.0 * assignment.[t, c]]
+      
       totalAssignments <== 1.0
   }
 
-let cityDemandConstraints =
+let cityDemandMetConstraints =
   ConstraintBuilder "CityDemand" {
     for c in cities ->
       let totalSupply = 
-        List.sum [for t in trucks -> capacity.[t] * assignment.[c, t]] // This is wrong indexing
+        List.sum 
+          [for t in trucks -> 
+            capacity.[t] * assignment.[c, t]]
+
       totalSupply >== demand.[c]
   }
 
@@ -98,8 +104,8 @@ let objective =
 
 let model =
   Model.create objective
-  |> Model.addConstraints singleAssignmentConstraints
-  |> Model.addConstraints cityDemandConstraints
+  |> Model.addConstraints truckAssignedOnceConstraints
+  |> Model.addConstraints cityDemandMetConstraints
 
 let result =
   Solver.solve Settings.basic model

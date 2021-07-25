@@ -30,14 +30,14 @@ let cities = [
 ]
 
 let demand = 
-  readOnlyDict [
+  Map [
     City "Portland",    10_000.0<Dose>
     City "Seattle",     15_000.0<Dose>
     City "Los Angeles", 18_000.0<Dose>
   ]
 
 let capacity = 
-  readOnlyDict [
+  Map [
     Truck "TruckA", 7_000.0<Crate/Load>
     Truck "TruckB", 9_000.0<Crate/Load>
     Truck "TruckC", 7_000.0<Crate/Load>
@@ -48,7 +48,7 @@ let capacity =
   ]
 
 let costs = 
-  readOnlyDict [
+  dict [
     (City "Portland"    , Truck "TruckA"), 12_000.0<USD/Load>
     (City "Portland"    , Truck "TruckB"), 13_000.0<USD/Load>
     (City "Portland"    , Truck "TruckC"), 13_000.0<USD/Load>
@@ -77,7 +77,7 @@ let assignment =
     for t in trucks do
     for c in cities ->
       Boolean
-  } |> Map
+  } |> dict
 
 let singleAssignmentConstraints =
   ConstraintBuilder "SingleAssignment" {
