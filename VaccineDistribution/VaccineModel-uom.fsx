@@ -4,6 +4,11 @@ open Flips
 open Flips.Types
 open Flips.UnitsOfMeasure
 
+fsi.AddPrinter<LinearExpression<_>> (fun x -> "Expression")
+fsi.AddPrinter<Objective<_>> (fun x -> "Objective")
+fsi.AddPrinter<Constraint> (fun x -> "Constraint")
+fsi.AddPrinter<model> (fun x -> "Model")
+
 type Truck = Truck of string
 type City = City of string
 [<Measure>] type Dose
