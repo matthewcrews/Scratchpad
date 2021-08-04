@@ -78,7 +78,8 @@ module rec SliceMap =
 
             result
 
-    type SliceMapExpression<'Key, 'Value when 'Key : comparison>(getKeyValuePairs: unit -> seq<KeyValuePair<'Key, 'Value>>) =
+
+    type SliceMap1DExpression<'Key, 'Value when 'Key : comparison>(getKeyValuePairs: unit -> seq<'Key * 'Value>) =
 
         let getKeyValuePairs = getKeyValuePairs
 
@@ -143,7 +144,7 @@ module rec SliceMap =
                         // must be the index for the next value. Return it and move IndexInterval forward
                         let nextIdx = Math.Max (keyInterval.Current.Interval.MinIdx, indexInterval.Current.MinIdx)
                         let nextValue = values.[nextIdx]
-                        let nextReturn = KeyValuePair (keyInterval.Current.Key, nextValue)
+                        let nextReturn = (keyInterval.Current.Key, nextValue)
 
                         // TODO: need to move the correct thing forward
                         let nextState =
@@ -169,28 +170,56 @@ module rec SliceMap =
         // Slices
         // 1D
         member this.Item
-            with get filter : SliceMapExpression<_, _> =
+            with get filter : SliceMap1DExpression<_, _> =
                 let newSm = SliceMap (this.KeyIndexRecords, this.Values, filter, this.IndexIntervals)
-                SliceMapExpression newSm.GetKeyValuePairs
+                SliceMap1DExpression newSm.GetKeyValuePairs
 
-        // static member inline ( .* ) (a: SliceMap<_,_>, b: SliceMap<_,_>) =
-        //     mergeSliceMaps (a, b)
+        static member inline ( .* ) (a: SliceMap<_,_>, b: SliceMap<_,_>) =
+            hadamardProduct1D a b
+
+
+    let inline internal hadamardProduct1D (a: SliceMap<_,_>) (b: SliceMap<_,_>) =
+
+        let rec loop (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue) =
+
+            if aHasValue && bHasValue then
+                let aKey, aValue = a.Current
+                let bKey, bValue = b.Current
+
+                if aKey = bKey then
+                    let nextValue = aValue * bValue
+                    let nextState = (a, a.MoveNext (), b, b.MoveNext())
+                    Some (nextValue, nextState)
+                elif aKey < bKey then
+                    loop (a, a.MoveNext (), b, bHasValue)
+                else
+                    loop (a, aHasValue, b, b.MoveNext ())
+
+            else
+                None
+
+        let result () =
+            let aKeyValuePairs = a.GetKeyValuePairs ()
+            let bKeyValuePairs = b.GetKeyValuePairs ()
+            let aEnumerator = aKeyValuePairs.GetEnumerator ()
+            let bEnumerator = bKeyValuePairs.GetEnumerator ()
+            (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
+            |> Seq.unfold loop
+        
+        SliceMap1DExpression result
+
 
 open SliceMap
+
 let x =
     [1..10]
     |> List.map (fun x -> x, float x)
     |> SliceMap
 
-let y = x.[GreaterThan 5]
-let a = y.GetKeyValuePairs () |> Array.ofSeq
-a
+let x2 =
+    [1..5]
+    |> List.map (fun x -> x, float x)
+    |> SliceMap
 
-// let x2 =
-//     [1..10]
-//     |> List.map (fun x -> x, { Chicken.Size = float x } )
-//     |> SliceMap
 
-// let z = x .* x2
-
-// // let y = x2 .* x.[Filter.GreaterThan 2] * 10.0
+let r = x .* x2
