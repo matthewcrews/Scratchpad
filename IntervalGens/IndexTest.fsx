@@ -28,7 +28,13 @@ let keys =
     data
     |> Array.map fst
 
-let generateKeys (keys: _[]) =
+let generateKeyIntervals1D (keys: _[]) =
+
+    keys
+    |> Array.mapi (fun idx key -> { Key = key; StartIdx = idx; EndIdx = idx })
+
+
+let generateKeyIntervals2D (keys: _[]) =
 
     if keys.Length = 0 then
         [], []
@@ -56,20 +62,24 @@ let generateKeys (keys: _[]) =
 
 let buildKeyRecords (intervals: KeyInterval<_> list) =
 
-    let x = List.toArray intervals
-    let result = Array.zeroCreate x.Length
-    let lastRecordIndexForInterval = Dictionary ()
+    if intervals.IsEmpty then
+        Array.empty
 
-    for idx = x.Length - 1 downto 0 do
-        let interval = x.[idx]
-        let lastIdx =
-            match lastRecordIndexForInterval.TryGetValue interval.Key with
-            | true, lastIdx -> lastIdx
-            | false, _ -> -1
-        lastRecordIndexForInterval.[interval.Key] <- idx
-        result.[idx] <- { Key = interval.Key; StartIdx = interval.StartIdx; EndIdx = interval.EndIdx; NextRecordIdx = lastIdx }
+    else
+        let x = List.toArray intervals
+        let result = Array.zeroCreate x.Length
+        let lastRecordIndexForInterval = Dictionary ()
 
-    result
+        for idx = x.Length - 1 downto 0 do
+            let interval = x.[idx]
+            let lastIdx =
+                match lastRecordIndexForInterval.TryGetValue interval.Key with
+                | true, lastIdx -> lastIdx
+                | false, _ -> -1
+            lastRecordIndexForInterval.[interval.Key] <- idx
+            result.[idx] <- { Key = interval.Key; StartIdx = interval.StartIdx; EndIdx = interval.EndIdx; NextRecordIdx = lastIdx }
+
+        result
 
 
 let x, y = generateKeys keys
