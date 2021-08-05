@@ -13,7 +13,7 @@ module rec SliceMap =
         MaxIdx : int
     }
 
-    type internal IndexRecord<'Key> = {
+    type internal KeyRecord<'Key> = {
         Key : 'Key
         Interval : Interval
         NextRecordIdx : int
@@ -23,6 +23,38 @@ module rec SliceMap =
         Key : 'Key
         Interval : Interval
     }
+    
+    let inline internal hadamardProduct1D (a: SliceMap<_,_>) (b: SliceMap<_,_>) =
+
+        let rec loop (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue) =
+
+            if aHasValue && bHasValue then
+                let aKey, aValue = a.Current
+                let bKey, bValue = b.Current
+
+                if aKey = bKey then
+                    let nextValue = aValue * bValue
+                    let nextReturn = aKey, nextValue
+                    let nextState = (a, a.MoveNext (), b, b.MoveNext())
+                    Some (nextReturn, nextState)
+                elif aKey < bKey then
+                    loop (a, a.MoveNext (), b, bHasValue)
+                else
+                    loop (a, aHasValue, b, b.MoveNext ())
+
+            else
+                None
+
+        let result () =
+            let aKeyValuePairs = a.GetKeyValuePairs ()
+            let bKeyValuePairs = b.GetKeyValuePairs ()
+            let aEnumerator = aKeyValuePairs.GetEnumerator ()
+            let bEnumerator = bKeyValuePairs.GetEnumerator ()
+            (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
+            |> Seq.unfold loop
+        
+        SliceMap1DExpression result
+
 
     let internal generateKeyIntervals1D (keys: _[]) =
         keys
@@ -89,7 +121,7 @@ module rec SliceMap =
 
 
     type SliceMap<'Key, 'Value when 'Key : comparison> 
-        private (keyIndexRecords: IndexRecord<'Key>[], values: 'Value[], filter: Filter<'Key>, indexIntervals: seq<Interval>) =
+        private (keyIndexRecords: KeyRecord<'Key>[], values: 'Value[], filter: Filter<'Key>, indexIntervals: seq<Interval>) =
 
         let keyIndexRecords = keyIndexRecords
         let values = values
@@ -125,11 +157,11 @@ module rec SliceMap =
             SliceMap (keyIndexRecords, values, Filter.All, indexIntervals)
 
 
-        member internal _.GetKeyValuePairs () =
+        member internal _.GetKeyValuePairs () : seq<'Key * 'Value> =
             let keyInterval = getKeyIntervalEnumerator ()
             let indexInterval = indexIntervals.GetEnumerator ()
 
-            let rec loop (keyInterval: IEnumerator<IndexRecord<'Key>>, keyIntervalHasValue, indexInterval: IEnumerator<Interval>, indexIntervalHasValue) =
+            let rec loop (keyInterval: IEnumerator<KeyRecord<'Key>>, keyIntervalHasValue, indexInterval: IEnumerator<Interval>, indexIntervalHasValue) =
 
                 if keyIntervalHasValue && indexIntervalHasValue then
                     
@@ -178,36 +210,6 @@ module rec SliceMap =
             hadamardProduct1D a b
 
 
-    let inline internal hadamardProduct1D (a: SliceMap<_,_>) (b: SliceMap<_,_>) =
-
-        let rec loop (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue) =
-
-            if aHasValue && bHasValue then
-                let aKey, aValue = a.Current
-                let bKey, bValue = b.Current
-
-                if aKey = bKey then
-                    let nextValue = aValue * bValue
-                    let nextState = (a, a.MoveNext (), b, b.MoveNext())
-                    Some (nextValue, nextState)
-                elif aKey < bKey then
-                    loop (a, a.MoveNext (), b, bHasValue)
-                else
-                    loop (a, aHasValue, b, b.MoveNext ())
-
-            else
-                None
-
-        let result () =
-            let aKeyValuePairs = a.GetKeyValuePairs ()
-            let bKeyValuePairs = b.GetKeyValuePairs ()
-            let aEnumerator = aKeyValuePairs.GetEnumerator ()
-            let bEnumerator = bKeyValuePairs.GetEnumerator ()
-            (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
-            |> Seq.unfold loop
-        
-        SliceMap1DExpression result
-
 
 open SliceMap
 
@@ -223,3 +225,4 @@ let x2 =
 
 
 let r = x .* x2
+let p = r.GetKeyValuePairs () |> Array.ofSeq
