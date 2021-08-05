@@ -24,7 +24,7 @@ module rec SliceMap =
         Interval : Interval
     }
     
-    let inline internal hadamardProduct1D (a: SliceMap<_,_>) (b: SliceMap<_,_>) =
+    let inline internal hadamardProduct1D (a: seq<_,_>) (b: seq<_,_>) =
 
         let rec loop (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue) =
 
@@ -46,10 +46,8 @@ module rec SliceMap =
                 None
 
         let result () =
-            let aKeyValuePairs = a.GetKeyValuePairs ()
-            let bKeyValuePairs = b.GetKeyValuePairs ()
-            let aEnumerator = aKeyValuePairs.GetEnumerator ()
-            let bEnumerator = bKeyValuePairs.GetEnumerator ()
+            let aEnumerator = a.GetEnumerator ()
+            let bEnumerator = b.GetEnumerator ()
             (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
             |> Seq.unfold loop
         
@@ -207,7 +205,7 @@ module rec SliceMap =
                 SliceMap1DExpression newSm.GetKeyValuePairs
 
         static member inline ( .* ) (a: SliceMap<_,_>, b: SliceMap<_,_>) =
-            hadamardProduct1D a b
+            hadamardProduct1D (a.GetKeyValuePairs ()) (b.GetKeyValuePairs ())
 
 
 
