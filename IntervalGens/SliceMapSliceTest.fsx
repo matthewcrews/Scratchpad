@@ -1,7 +1,7 @@
-open System
-open System.Collections.Generic
+module rec TestSliceMap =
 
-module rec SliceMap =
+    open System
+    open System.Collections.Generic
 
     type Filter =
         | All
@@ -26,7 +26,7 @@ module rec SliceMap =
 
         let overlaps (i1: seq<Interval>) (i2: seq<Interval>) =
 
-            let rec loop (s1: IEnumerator<Interval>, s1HasValue: bool, s2: IEnumerator<Interval>, s2HasValue: bool) =
+            let rec loop (struct (s1: IEnumerator<Interval>, s1HasValue: bool, s2: IEnumerator<Interval>, s2HasValue: bool)) =
 
                 if s1HasValue && s2HasValue then
 
@@ -41,9 +41,9 @@ module rec SliceMap =
                             }
 
                         if s1.Current.Max > s2.Current.Max then
-                            Some (nextInterval, (s1, s1HasValue, s2, s2.MoveNext ()))
+                            Some (nextInterval, struct (s1, s1HasValue, s2, s2.MoveNext ()))
                         else
-                            Some (nextInterval, (s1, s1.MoveNext (), s2, s2HasValue))
+                            Some (nextInterval, struct (s1, s1.MoveNext (), s2, s2HasValue))
 
                 else
                     None
@@ -51,15 +51,15 @@ module rec SliceMap =
             let s1 = i1.GetEnumerator ()
             let s2 = i2.GetEnumerator ()
 
-            let state = (s1, s1.MoveNext (), s2, s2.MoveNext ())
+            let state = struct (s1, s1.MoveNext (), s2, s2.MoveNext ())
             Seq.unfold loop state
-    
+        
 
     // This performs a Hadamard Product of two sequences. The `joiner` function is used
     // to map the higher dimensional seq `higher` to the lower dimensional seq `lower`.
     let inline internal hadamardProductDifferentDims (higher: seq<_>) (lower: seq<_>) joiner =
 
-        let rec loop (higher: IEnumerator<_>, higherHasValue, lower: IEnumerator<_>, lowerHasValue) =
+        let rec loop (struct (higher: IEnumerator<_>, higherHasValue, lower: IEnumerator<_>, lowerHasValue)) =
 
             if higherHasValue && lowerHasValue then
                 let higherKey, higherValue = higher.Current
@@ -70,26 +70,26 @@ module rec SliceMap =
                 if higherJoinKey = lowerKey then
                     let nextValue = higherValue * lowerValue
                     let nextReturn = higherKey, nextValue
-                    let nextState = (higher, higher.MoveNext (), lower, lower.MoveNext())
+                    let nextState = struct (higher, higher.MoveNext (), lower, lower.MoveNext())
                     Some (nextReturn, nextState)
                 elif higherJoinKey < lowerKey then
-                    loop (higher, higher.MoveNext (), lower, lowerHasValue)
+                    loop struct (higher, higher.MoveNext (), lower, lowerHasValue)
                 else
-                    loop (higher, higherHasValue, lower, lower.MoveNext ())
+                    loop struct (higher, higherHasValue, lower, lower.MoveNext ())
 
             else
                 None
 
         let higherEnumerator = higher.GetEnumerator ()
         let lowerEnumerator = lower.GetEnumerator ()
-        (higherEnumerator, higherEnumerator.MoveNext (), lowerEnumerator, lowerEnumerator.MoveNext ())
-        |> Seq.unfold loop
-        
+        let initialState = struct (higherEnumerator, higherEnumerator.MoveNext (), lowerEnumerator, lowerEnumerator.MoveNext ())
+        Seq.unfold loop initialState
+            
 
     // Performs the Hadamard Product on two sequences with matching dimensions.
-    let inline internal hadamardProduct (a: seq<_>) (b: seq<_>) =
+    let inline hadamardProduct (a: seq<_>) (b: seq<_>) =
 
-        let rec loop (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue) =
+        let rec loop (struct (a: IEnumerator<_>, aHasValue, b: IEnumerator<_>, bHasValue)) =
 
             if aHasValue && bHasValue then
                 let aKey, aValue = a.Current
@@ -98,21 +98,21 @@ module rec SliceMap =
                 if aKey = bKey then
                     let nextValue = aValue * bValue
                     let nextReturn = aKey, nextValue
-                    let nextState = (a, a.MoveNext (), b, b.MoveNext())
+                    let nextState = struct (a, a.MoveNext (), b, b.MoveNext())
                     Some (nextReturn, nextState)
                 elif aKey < bKey then
-                    loop (a, a.MoveNext (), b, bHasValue)
+                    loop struct (a, a.MoveNext (), b, bHasValue)
                 else
-                    loop (a, aHasValue, b, b.MoveNext ())
+                    loop struct (a, aHasValue, b, b.MoveNext ())
 
             else
                 None
 
         let aEnumerator = a.GetEnumerator ()
         let bEnumerator = b.GetEnumerator ()
-        (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
-        |> Seq.unfold loop
-        
+        let initialState = struct (aEnumerator, aEnumerator.MoveNext (), bEnumerator, bEnumerator.MoveNext ())
+        Seq.unfold loop initialState
+            
 
 
     let internal generateKeyIntervals1D (keys: _[]) =
@@ -150,13 +150,16 @@ module rec SliceMap =
     let internal buildKeyRecords (intervals: KeyInterval<_>[]) =
 
         if intervals.Length = 0 then
-            Array.empty
+            Array.empty, Dictionary ()
         else
             let result = Array.zeroCreate intervals.Length
             let lastRecordIndexForInterval = Dictionary ()
+            let initialIndex = Dictionary ()
 
             for idx = intervals.Length - 1 downto 0 do
                 let keyInterval = intervals.[idx]
+                // We want to keep track of what will be the FIRST record for a give key
+                initialIndex.[keyInterval.Key] <- idx
                 let lastIdx =
                     match lastRecordIndexForInterval.TryGetValue keyInterval.Key with
                     | true, lastIdx -> lastIdx
@@ -164,25 +167,27 @@ module rec SliceMap =
                 lastRecordIndexForInterval.[keyInterval.Key] <- idx
                 result.[idx] <- { Key = keyInterval.Key; Interval = keyInterval.Interval; NextRecordIdx = lastIdx }
 
-            result
+            result, initialIndex
 
 
-    type SliceMapExpr<'Key, 'Value when 'Key : comparison> internal (keyValuePairs: seq<'Key * 'Value>) =
+    type SliceMapExpr<'Key, 'Value when 'Key : comparison> (keyValuePairs: seq<'Key * 'Value>) =
 
         let keyValuePairs = keyValuePairs
 
         member _.KeyValuePairs = keyValuePairs
         member _.Values = keyValuePairs |> Seq.map snd
 
-        static member ( .* ) (expr: SliceMapExpr<_,_>, sm: SliceMap<_,_>) =
+        static member inline ( .* ) (expr: SliceMapExpr<_,_>, sm: SliceMap<_,_>) =
             hadamardProduct expr.KeyValuePairs sm.KeyValuePairs
             |> SliceMapExpr
 
 
     type SliceMap<'Key, 'Value when 'Key : comparison> 
-        internal (keyIndexRecords: KeyRecord<'Key>[], values: 'Value[], indexIntervals: seq<Interval>) =
+        internal (keyIndexRecords: KeyRecord<'Key>[], firstIndexForKey: Dictionary<'Key, int>, values: 'Value[], indexIntervals: seq<Interval>) =
 
         let keyIndexRecords = keyIndexRecords
+        // TODO: Use for optimization when filtering
+        let firstIndexForKey = firstIndexForKey
         let values = values
         let indexIntervals = indexIntervals
 
@@ -195,33 +200,34 @@ module rec SliceMap =
                 Array.sortInPlaceBy fst x
                 x
 
-            let keyIndexRecords = 
+            let keyIndexRecords, firstIndexForKey = 
                 sortedData
                 |> Array.map fst
                 |> generateKeyIntervals1D
                 |> buildKeyRecords
-            
+                
             let values = sortedData |> Array.map snd
             let indexIntervals = Seq.singleton { Min = 0; Max = values.Length - 1 }
-            SliceMap (keyIndexRecords, values, indexIntervals)
+            SliceMap (keyIndexRecords, firstIndexForKey, values, indexIntervals)
 
 
-        member internal _.KeyValuePairs : seq<'Key * 'Value> =
+        member _.KeyValuePairs : seq<'Key * 'Value> =
             let keyInterval =
                 let outputSeq = Array.toSeq keyIndexRecords
                 outputSeq.GetEnumerator ()
+
             let indexInterval = indexIntervals.GetEnumerator ()
 
-            let rec loop (keyInterval: IEnumerator<KeyRecord<'Key>>, keyIntervalHasValue, indexInterval: IEnumerator<Interval>, indexIntervalHasValue) =
+            let rec loop (struct (keyInterval: IEnumerator<KeyRecord<'Key>>, keyIntervalHasValue, indexInterval: IEnumerator<Interval>, indexIntervalHasValue)) =
 
                 if keyIntervalHasValue && indexIntervalHasValue then
-                    
+                        
                     if keyInterval.Current.Interval.Max < indexInterval.Current.Min then
                         // The KeyInterval is behind the IndexInterval to move KeyInterval forward
-                        loop (keyInterval, keyInterval.MoveNext (), indexInterval, indexIntervalHasValue)
+                        loop struct (keyInterval, keyInterval.MoveNext (), indexInterval, indexIntervalHasValue)
                     elif indexInterval.Current.Max < keyInterval.Current.Interval.Min then
                         // The IndexInterval is behind the KeyInterval so move the IndexInterval forward
-                        loop (keyInterval, keyIntervalHasValue, indexInterval, indexInterval.MoveNext ())
+                        loop struct (keyInterval, keyIntervalHasValue, indexInterval, indexInterval.MoveNext ())
                     else
                         // The KeyInterval and the IndexInterval overlap. By definition, the Max Value of the MinIndices
                         // must be the index for the next value. Return it and move IndexInterval forward
@@ -232,17 +238,17 @@ module rec SliceMap =
                         // NOTE: Could possibly be wrong. Need to think about this
                         let nextState =
                             if keyInterval.Current.Interval.Max > indexInterval.Current.Max then
-                                keyInterval, keyIntervalHasValue, indexInterval, indexInterval.MoveNext ()
+                                struct (keyInterval, keyIntervalHasValue, indexInterval, indexInterval.MoveNext ())
                             else
-                                keyInterval, keyInterval.MoveNext (), indexInterval, indexIntervalHasValue
+                                struct (keyInterval, keyInterval.MoveNext (), indexInterval, indexIntervalHasValue)
 
                         Some (nextReturn, nextState)
 
                 else
                     None
 
-            (keyInterval, keyInterval.MoveNext (), indexInterval, indexInterval.MoveNext ())
-            |> Seq.unfold loop
+            let initialState = struct (keyInterval, keyInterval.MoveNext (), indexInterval, indexInterval.MoveNext ())
+            Seq.unfold loop initialState
 
         member this.Values = this.KeyValuePairs |> Seq.map snd
 
@@ -253,33 +259,33 @@ module rec SliceMap =
 
 
     type SliceMap2D<'Key1, 'Key2, 'Value when 'Key1 : comparison and 'Key2 : comparison>
-        internal (key1Intervals: KeyRecord<'Key1>[], key2Intervals: KeyRecord<'Key2>[], values: 'Value[], indexIntervals: seq<Interval>) =
+        internal (key1Intervals: KeyRecord<'Key1>[], firstIndexForKey1: Dictionary<'Key1, int>, key2Intervals: KeyRecord<'Key2>[], firstIndexForKey2: Dictionary<'Key2, int>, values: 'Value[], indexIntervals: seq<Interval>) =
 
         let key1Intervals = key1Intervals
+        let firstIndexForKey1 = firstIndexForKey1
         let key2Intervals = key2Intervals
+        let firstIndexForKey2 = firstIndexForKey2
         let values = values
         let indexIntervals = indexIntervals
 
-        let getIntervalsForKey (intervals: KeyRecord<_>[]) key =
-            
-            if intervals.Length > 0 then
+        let getIntervalsForKey (intervals: KeyRecord<_>[]) (firstIntervalsForKey: Dictionary<_, int>) key =
                 
+            match firstIntervalsForKey.TryGetValue key with
+            | true, firstIdx ->
+
                 let rec loop idx =
                     if idx > intervals.Length - 1 then
                         None
                     else
                         let record = intervals.[idx]
-                        if record.Key = key then
-                            // We now just start skipping to the intervals we care about
-                            let nextIdx = record.NextRecordIdx
-                            Some (record.Interval, nextIdx)
-                        else
-                            loop (idx + 1)
+                        let nextIdx = record.NextRecordIdx
+                        Some (record.Interval, nextIdx)
 
-                0
+                firstIdx
                 |> Seq.unfold loop
 
-            else
+
+            | false, _ ->
                 Seq.empty
 
 
@@ -298,100 +304,76 @@ module rec SliceMap =
                 |> Array.map keySelector
                 |> generateKeyIntervals2D
 
-            let key1Records = buildKeyRecords key1Intervals
-            let key2Records = buildKeyRecords key2Intervals
-            
+            let key1Records, firstIndexForKey1 = buildKeyRecords key1Intervals
+            let key2Records, firstIndexForKey2 = buildKeyRecords key2Intervals
+                
             let values = sortedData |> Array.map (fun (_,_,v) -> v)
             let indexIntervals = Seq.singleton { Min = 0; Max = values.Length - 1 }
-            SliceMap2D (key1Records, key2Records, values, indexIntervals)
+            SliceMap2D (key1Records, firstIndexForKey1, key2Records, firstIndexForKey2, values, indexIntervals)
 
 
         member this.Item
             // NOTE: Ignoring the Filter at this time
             with get (f: Filter, sliceKey: 'Key2) =
-                let key2Intervals = getIntervalsForKey key2Intervals sliceKey
+                let key2Intervals = getIntervalsForKey key2Intervals firstIndexForKey2 sliceKey
                 let overlaps = Interval.overlaps key2Intervals indexIntervals
-                SliceMap (key1Intervals, values, overlaps)
+                SliceMap (key1Intervals, firstIndexForKey1, values, overlaps)
 
         member this.Item
             // NOTE: Ignoring the Filter at this time
             with get (sliceKey: 'Key1, f: Filter) =
-                let key1Intervals = getIntervalsForKey key1Intervals sliceKey
+                let key1Intervals = getIntervalsForKey key1Intervals firstIndexForKey1 sliceKey
                 let overlaps = Interval.overlaps key1Intervals indexIntervals
-                SliceMap (key2Intervals, values, overlaps)
+                SliceMap (key2Intervals, firstIndexForKey2, values, overlaps)
 
-// type Summer () =
 
-//     member inline _.Sum (x: seq<(_ * _)>) =
-//         let mutable acc = FSharp.Core.LanguagePrimitives.GenericZero
+    let inline inputs (v) = 
+        ((^InputValues) : (member Values: seq< ^Value>) v)
 
-//         for (_, v) in x do
-//             acc <- acc + v
+    let inline zero () = FSharp.Core.LanguagePrimitives.GenericZero<_>
 
-//         acc
+    let inline sum x =
 
-//     member inline _.Sum (x: seq<(_ * _ * _)>) =
-//         let mutable acc = FSharp.Core.LanguagePrimitives.GenericZero
+        let mutable acc = zero ()
+        let values = inputs x
 
-//         for (_, _, v) in x do
-//             acc <- acc + v
+        for v in values do
+            acc <- acc + v
 
-//         acc
+        acc
 
-// let summer = Summer ()
+    // module rec TestTypes =
 
-// let inline sum< ^InputValues, ^Value, ^Result 
-//                  when 'InputValues : (member Values : seq< ^Value>)
-//                  and ( ^Result or ^Value) : (static member (+) : ^Result * ^Value -> ^Result)
-//                  and ^Result : (static member Zero : ^Result)>
-//                  (x: ^InputValues) : ^Result =
+    //     type Chicken = {
+    //         Size : int
+    //     } with
+    //         static member ( + ) (c: Chicken, Chickens cs) : Chickens =
+    //             Chickens (c::cs)
 
-//     let mutable acc = FSharp.Core.LanguagePrimitives.GenericZero< ^Result>
-//     let values = ((^InputValues) : (member Values: seq< ^Value>) x)
+    //         static member Zero =
+    //             Chickens.Zero
 
-//     for v in values do
-//         acc <- acc + v // Problem is with the right `acc`. It says it's missing a type constraint
+    //     type Chickens = Chickens of Chicken list
+    //         with
+    //             static member ( + ) (Chickens cs, c: Chicken) : Chickens =
+    //                 Chickens (c::cs)
 
-//     acc
+    //             static member Zero =
+    //                 Chickens []
 
-let inline sum x =
+    //     type Flock (c: seq<Chicken>) =
+    //         member _.Values = c
 
-    let mutable acc = FSharp.Core.LanguagePrimitives.GenericZero
-    let values = ((^InputValues) : (member Values: seq< ^Value>) x)
+    // open TestTypes
 
-    for v in values do
-        acc <- acc + v
+    // let flock = 
+    //     seq { for i in 1..10 -> { Size = i }}
+    //     |> Flock
+    // let chickenSum = sum flock // Compiler angry. sum is inferring the incorrect return type
+    // let chickenSum2 : Chickens = sum flock // Compiler accepts this
 
-    acc
+open TestSliceMap
 
-// let x = [0..10] |> sum
-module rec TestTypes =
-
-    type Chicken = {
-        Size : int
-    } with
-        static member ( + ) (c: Chicken, Chickens cs) : Chickens =
-            Chickens (c::cs)
-
-        static member Zero =
-            Chickens.Zero
-
-    type Chickens = Chickens of Chicken list
-        with
-            static member ( + ) (Chickens cs, c: Chicken) : Chickens =
-                Chickens (c::cs)
-
-            static member Zero =
-                Chickens []
-
-// open TestTypes
-// let chickenList = 
-//     [for i in 0 .. 5 -> i, { Size = i }]
-//     |> SliceMap
-
-// let chickenTotal = sum chickenList
-
-open SliceMap
 
 let x =
     [1..10]
