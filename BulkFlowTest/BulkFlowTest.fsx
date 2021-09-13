@@ -31,6 +31,7 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
             None
 
 
+
 module rec Modeling =
 
     type INode =
@@ -47,56 +48,274 @@ module rec Modeling =
 
     type Tank = {
         Name : string
-        Capacity : float
-        Inputs : INode list
     } with
         interface INode with
             member x.Name = x.Name
 
     module Tank =
 
-        let create name capacity inputs =
+        let create name =
             {
                 Name = name
-                Capacity = capacity
-                Inputs = inputs
             }
-
-    type Process = {
-        Name : string
-        Failure : Failure
-        Input : INode
-    } with
-        interface INode with
-            member x.Name = x.Name
-
-    type Split = {
-        Name : string
-        Input : INode
-    } with
-        interface INode with
-            member x.Name = x.Name
-
-    type Merge = {
-        Name : string
-        Inputs : INode list
-    } with
-        interface INode with
-            member x.Name = x.Name
 
     type Valve = {
         Name : string
-        Input : INode
     } with
         interface INode with
             member x.Name = x.Name
 
+    //type Split = {
+    //    Name : string
+    //} with
+    //    interface INode with
+    //        member x.Name = x.Name
 
-open Modeling
+    //type Merge = {
+    //    Name : string
+    //} with
+    //    interface INode with
+    //        member x.Name = x.Name
 
-let t1 = Tank.create "t1" 1.0 []
-let t2 = Tank.create "t2" 1.0 [t1]
-let t3 = Tank.create "t3" 1.0 [t1; t2]
+    type Conveyor = {
+        Name : string
+    } with
+        interface INode with
+            member x.Name = x.Name
+
+    type Conversion = {
+        Name : string
+    } with
+        interface INode with
+            member x.Name = x.Name
+
+    type Link = {
+        Source : INode
+        Sink : INode
+    }
+
+    module Link =
+
+        let create source sink =
+            {
+                Source = source
+                Sink = sink
+            }
+
+    //type TankNode = {
+    //    Inputs : INode list
+    //    Outputs : INode list
+    //}
+
+    //type ValveNode = {
+    //    Input : INode
+    //    Output : INode
+    //}
+
+    //type ConversionNode = {
+    //    Input : INode
+    //    Output : INode
+    //}
+
+    //type ConveyorNode = {
+    //    Inputs : INode list
+    //    Output : INode
+    //}
+
+    //type Network = {
+    //    Tanks : TankNode list
+    //    Valves : ValveNode list
+    //    Conversions : ConversionNode list
+    //    Conveyors : ConveyorNode list
+    //}
+
+
+    type ValveStatus =
+        | Open
+        | Closed
+        | Set of maxRate: float
+
+    type ValveState = {
+        Status : ValveStatus
+        Inputs : Link list
+        Outputs : Link list
+    }
+
+    module ValveState =
+
+        let create inputs outputs =
+            {
+                Status = ValveStatus.Closed
+                Inputs = inputs
+                Outputs = outputs
+            }
+
+    type ConversionState = {
+        ConversionRate : float
+        Inputs : Link list
+        Outputs : Link list
+    }
+
+    module ConversionState =
+
+        let create inputs outputs =
+            {
+                ConversionRate = 1.0
+                Inputs = inputs
+                Outputs = outputs
+            }
+
+    type TankStatus =
+        | Full
+        | Empty
+        | Partial of currentLevel: float
+
+    type TankState = {
+        //MaxCapacity : float
+        Status : TankStatus
+        DrainRate : float
+        FillRate : float
+        Inputs : Link list
+        Outputs : Link list
+    }
+
+    module TankState =
+
+        let create inputs outputs =
+            {
+                Status = TankStatus.Empty
+                DrainRate = 0.0
+                FillRate = 0.0
+                Inputs = inputs
+                Outputs = outputs
+            }
+
+    type ConveyorLoad = {
+        ConveyorLocation : float
+        ConveyorLoadingVelocity : float
+        InputRate : float
+    }
+
+    type ConveyorState = {
+        Inputs : Link list
+        Outputs : Link list
+        CurrentVelocity : float
+        CurrentLocation : float
+        Loads : ResizeArray<ConveyorLoad>
+    }
+
+    module ConveyorState =
+
+        let create inputs outputs =
+            {
+                Inputs = inputs
+                Outputs = outputs
+                CurrentVelocity = 1.0
+                CurrentLocation = 0.0
+                Loads = ResizeArray()
+            }
+
+    type NetworkState = {
+        Valves : Dictionary<Valve, ValveState>
+        Conversions : Dictionary<Conversion, ConversionState>
+        Tanks : Dictionary<Tank, TankState>
+        Conveyors : Dictionary<Conveyor, ConveyorState>
+    }
+
+    module NetworkState =
+
+        let empty () =
+            {
+                Valves = Dictionary ()
+                Conversions = Dictionary ()
+                Tanks = Dictionary ()
+                Conveyors = Dictionary ()
+            }
+
+        let private createInputOutputMapping (links: Link list) =
+            let nodeInputs = Dictionary<INode, HashSet<Link>>()
+            let nodeOutputs = Dictionary<INode, HashSet<Link>>()
+            let nodes = HashSet<INode>()
+            
+            for link in links do
+                nodes.Add link.Source
+                nodes.Add link.Sink
+
+                match nodeInputs.TryGetValue link.Sink with
+                | true, inputs ->  
+                    inputs.Add link
+                    ()
+                | false, _ ->
+                    let inputs = HashSet [link]
+                    nodeInputs.[link.Sink] <- inputs
+
+                match nodeOutputs.TryGetValue link.Source with
+                | true, outputs ->
+                    outputs.Add link
+                    ()
+                | false, _ ->
+                    let outputs = HashSet [link]
+                    nodeOutputs.[link.Source] <- outputs
+
+            nodes, nodeInputs, nodeOutputs
+
+        let create (links: Link list) =
+            let nodes, nodeInputs, nodeOutputs = createInputOutputMapping links
+            let result = empty ()
+
+            for node in nodes do
+                let inputs = 
+                    match nodeInputs.TryGetValue node with
+                    | true, inputs -> List.ofSeq inputs
+                    | false, _ -> []
+
+                let outputs =
+                    match nodeOutputs.TryGetValue node with
+                    | true, outputs -> List.ofSeq outputs
+                    | false, _ -> []
+
+                match node with
+                | :? Tank as tank ->
+                    let tankState = TankState.create inputs outputs
+                    result.Tanks.[tank] <- tankState
+                
+                | :? Valve as valve -> 
+                    let valveState = ValveState.create inputs outputs
+                    result.Valves.[valve] <- valveState
+
+                | :? Conversion as conversion ->
+                    let conversionState = ConversionState.create inputs outputs
+                    result.Conversions.[conversion] <- conversionState
+
+                | :? Conveyor as conveyor ->
+                    let conveyorState = ConveyorState.create inputs outputs
+                    result.Conveyors.[conveyor] <- conveyorState
+                | _ -> invalidArg (nameof node) "Unsupported node type in network"
+
+            result
+            
+
+
+//module Simulation =
+
+    
+
+(*
+Update cycle
+1) Update the level and TankStatus for each tank
+2) Update the Current Location of Conveyors
+    - If location >= first in loads queue, pop the queue
+
+3) Apply change to the network
+4) Solve for the Flows
+5) Update the TankState for each tank with new Fill/Drain rates
+6) Enqueue new ConveyorLoad, only need to do this if the InputRate or Velocity changes
+7) Evaluate next event for Tanks and Conveyors
+8) Select next event and set it as the NextNetworkEvent
+
+*)
+
+//open Modeling
 
     //[<RequireQualifiedAccess>]
     //type Node =
