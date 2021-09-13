@@ -33,6 +33,9 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
 
 module rec Modeling =
 
+    type INode =
+        abstract member Name : string
+
     type Distribution =
         | Static of float
         | Uniform of min:float * max:float
@@ -45,233 +48,224 @@ module rec Modeling =
     type Tank = {
         Name : string
         Capacity : float
-    }
+        Inputs : INode list
+    } with
+        interface INode with
+            member x.Name = x.Name
+
+    module Tank =
+
+        let create name capacity inputs =
+            {
+                Name = name
+                Capacity = capacity
+                Inputs = inputs
+            }
 
     type Process = {
         Name : string
         Failure : Failure
-    }
+        Input : INode
+    } with
+        interface INode with
+            member x.Name = x.Name
 
     type Split = {
         Name : string
-    }
+        Input : INode
+    } with
+        interface INode with
+            member x.Name = x.Name
 
     type Merge = {
         Name : string
-    }
+        Inputs : INode list
+    } with
+        interface INode with
+            member x.Name = x.Name
 
     type Valve = {
         Name : string
-    }
-
-    [<RequireQualifiedAccess>]
-    type Node =
-        | Tank of Tank
-        | Process of Process
-        | Split of Split
-        | Merge of Merge
-        | Valve of Valve
-        with
-            member x.Name =
-                match x with
-                | Node.Tank t -> t.Name
-                | Node.Process p -> p.Name
-                | Node.Split s -> s.Name
-                | Node.Merge m -> m.Name
-                | Node.Valve v -> v.Name
-
-    type Link = {
-        Source : Node
-        Sink : Node
+        Input : INode
     } with
-        member x.Name = $"{x.Source.Name}->{x.Sink.Name}"
-
-    type Network = {
-        Links : Link list
-    }
-
-module rec Simulation =
-
-    type Material = {
-        Value : string
-    }
-
-    type Proportion = {
-        Value : float
-    }
-
-    type Mix = {
-        Value : Map<Material, Proportion>
-    }
-
-    type Flow = {
-        Mix : Mix
-        Rate : float
-    }
-        
-
-    [<RequireQualifiedAccess>]
-    type MergeSetting =
-        | Single of link: Modeling.Link
-        | Mix of Map<Modeling.Link, Proportion>
-
-    [<RequireQualifiedAccess>]
-    type SplitSetting =
-        | Single of link: Modeling.Link
-        | Mix of Map<Modeling.Link, Proportion>
-
-    type Layer (mix: Mix, quantity: float) =
-        let mix = mix
-        let mutable quantity = quantity
-
-        member _.Mix = mix
-        member _.Quantity = quantity
-
-        member _.Remove x =
-            quantity <- quantity - x       
+        interface INode with
+            member x.Name = x.Name
 
 
-    type Tank (name: string, capacity: float, input: Modeling.Node list, outputs: Modeling.Node list) =
-        member val Name = name
-        member val Input = input
-        member val Outputs = outputs
-        member val Layers = Queue<Layer>()
-        member val Capacity = capacity
+open Modeling
 
-        member x.Level =
-            x.Layers
-            |> Seq.sumBy (fun layer -> layer.Quantity)
+let t1 = Tank.create "t1" 1.0 []
+let t2 = Tank.create "t2" 1.0 [t1]
+let t3 = Tank.create "t3" 1.0 [t1; t2]
 
-    [<RequireQualifiedAccess>]
-    type TankStatus =
-        | Full
-        | Empty
-        | Filling of float
+    //[<RequireQualifiedAccess>]
+    //type Node =
+    //    | Tank of Tank
+    //    | Process of Process
+    //    | Split of Split
+    //    | Merge of Merge
+    //    | Valve of Valve
+    //    with
+    //        member x.Name =
+    //            match x with
+    //            | Node.Tank t -> t.Name
+    //            | Node.Process p -> p.Name
+    //            | Node.Split s -> s.Name
+    //            | Node.Merge m -> m.Name
+    //            | Node.Valve v -> v.Name
 
-    type TankState = {
-        Status : TankStatus
-        Layers : Stack<Layer>
-    }
+    //type Link = {
+    //    Source : Node
+    //    Sink : Node
+    //} with
+    //    member x.Name = $"{x.Source.Name}->{x.Sink.Name}"
 
-    [<RequireQualifiedAccess>]
-    type ProcessStatus =
-        | Up
-        | Down
-        | Off
+    //type Network = {
+    //    Links : Link list
+    //}
 
-    type ProcessSetting = {
-        MaxRate : float
-        ConversionFactor : float
-        Output : Material
-    }
+//module rec State =
 
-    type ProcessState = {
-        Setting : ProcessSetting
-        Status : ProcessStatus
-        Failures : DateTime list
-    }
+//    open Modeling
+    
+//    type Proportion = {
+//        Value : float
+//    }
 
-    type SplitState = {
-        Setting : SplitSetting
-    }
 
-    type MergeState = {
-        Setting : MergeSetting
-    }
+//    type TankState = {
+//        Level : float
+//        FillRate : float
+//    }
 
-    [<RequireQualifiedAccess>]
-    type ValveSetting =
-        | Open
-        | Closed
+//    [<RequireQualifiedAccess>]
+//    type ProcessStatus =
+//        | Up
+//        | Down
 
-    type ValveState = {
-        Setting : ValveSetting
-    }
+//    type ProcessSetting = {
+//        MaxInputRate : float
+//        ConversionRate : float
+//    }
 
-    type Site = {
-        Tanks : Dictionary<Tank, TankState>
-        Processes : Dictionary<Process, ProcessState>
-        Merges : Dictionary<Merge, MergeState>
-        Splits : Dictionary<Split, SplitState>
-        Valves : Dictionary<Valve, ValveState>
-    }
+//    type ProcessState = {
+//        Setting : ProcessSetting
+//        Status : ProcessStatus
+//        Failures : DateTime list
+//    }
+
+//    [<RequireQualifiedAccess>]
+//    type SplitSetting =
+//        | Single of link: Modeling.Node
+//        | Mix of Map<Modeling.Node, Proportion>
+
+//    type SplitState = {
+//        Setting : SplitSetting
+//    }
+    
+//    [<RequireQualifiedAccess>]
+//    type MergeSetting =
+//        | Single of link: Modeling.Node
+//        | Mix of Map<Modeling.Node, Proportion>
+
+//    type MergeState = {
+//        Setting : MergeSetting
+//    }
+
+//    [<RequireQualifiedAccess>]
+//    type ValveSetting =
+//        | Open
+//        | Closed
+
+//    type ValveState = {
+//        Setting : ValveSetting
+//    }
+
+//    type Site = {
+//        Tanks : Dictionary<Tank, TankState>
+//        Processes : Dictionary<Process, ProcessState>
+//        Merges : Dictionary<Merge, MergeState>
+//        Splits : Dictionary<Split, SplitState>
+//        Valves : Dictionary<Valve, ValveState>
+//    }
 
 
 
-module Planning =
+//module Planning =
 
-    open Modeling
+//    open Modeling
+//    open State
 
-    [<RequireQualifiedAccess>]
-    type Action =
-        | SetMerge of MergeSetting
-        | SetSplit of SplitSetting
-        | OpenValve of Valve
-        | CloseValve of Valve
+//    [<RequireQualifiedAccess>]
+//    type Action =
+//        | SetMerge of MergeSetting
+//        | SetSplit of SplitSetting
+//        | OpenValve of Valve
+//        | CloseValve of Valve
 
-    [<RequireQualifiedAccess>]
-    type Trigger =
-        | Time of time: DateTime
-        | FillTo of tank: Tank * level: float
-        | DrainTo of tank: Tank * level: float
-        | FillQuantity of tank: Tank * amount: float
-        | DrainQuantity of tank: Tank * amount: float
-        | ForDuration of duration: TimeSpan
+//    [<RequireQualifiedAccess>]
+//    type Trigger =
+//        | AtTime of time: DateTime
+//        | FillTo of tank: Tank * level: float
+//        | DrainTo of tank: Tank * level: float
+//        | FillQuantity of tank: Tank * amount: float
+//        | DrainQuantity of tank: Tank * amount: float
+//        | ForDuration of duration: TimeSpan
 
-    type Step = {
-        Trigger : Trigger
-        Actions : Action list
-    }
+//    type Step = {
+//        Trigger : Trigger
+//        Actions : Action list
+//    }
 
-    type PlanName = PlanName of string
+//    type PlanName = PlanName of string
 
-    type Plan = {
-        Name : PlanName
-        Steps : Step list
-    }
+//    type Plan = {
+//        Name : PlanName
+//        Steps : Step list
+//    }
 
 
-module Simulation =
+//module Simulation =
 
-    open Modeling
+//    open Modeling
 
-    type FlowEvent =
-        | Filled of Tank
-        | Emptied of Tank
-        | Trigger of Planning.Trigger
+//    type FlowEvent =
+//        | Filled of Tank
+//        | Emptied of Tank
+//        | Trigger of Planning.Trigger
 
-    type EventType =
-        | Failed of Process
-        | Recovered of Process
+//    type EventType =
+//        | Failed of Process
+//        | Recovered of Process
 
-    type Event = {
-        Id : int64
-        Time : DateTime
-        Type : EventType
-    }
+//    type Event = {
+//        Id : int64
+//        Time : DateTime
+//        Type : EventType
+//    }
 
-    type State (initialId: int, startTime: DateTime, site: Site) =
-        let mutable nextId = initialId
-        let events = PriorityQueue<DateTime, Event> ()
-        let mutable now = startTime
+//    type State (initialId: int, startTime: DateTime, site: State.Site) =
+//        let mutable nextId = initialId
+//        let events = PriorityQueue<DateTime, Event> ()
+//        let mutable now = startTime
 
-        member val Site = site
+//        member val Site = site
 
-        member this.TryNextEvent () =
-            match events.TryDequeue () with
-            | Some (nextTime, nextAction) ->
-                now <- nextTime
-                Some (nextTime, nextAction)
-            | None ->
-                None
+//        member this.TryNextEvent () =
+//            match events.TryDequeue () with
+//            | Some (nextTime, nextAction) ->
+//                now <- nextTime
+//                Some (nextTime, nextAction)
+//            | None ->
+//                None
 
-        member _.AddEvent (time, act) =
-            events.Add (time, act)
+//        member _.AddEvent (time, act) =
+//            events.Add (time, act)
 
-        member _.NextId
-            with get () =
-                let next = nextId 
-                nextId <- next + 1
-                next
+//        member _.NextId
+//            with get () =
+//                let next = nextId 
+//                nextId <- next + 1
+//                next
 
-        member _.Now = now
+//        member _.Now = now
