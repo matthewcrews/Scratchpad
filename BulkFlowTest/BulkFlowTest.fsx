@@ -1,3 +1,5 @@
+#r "nuget: Flips, 2.4.5"
+
 open System
 open System.Collections.Generic
 
@@ -34,6 +36,7 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
 module rec Modeling =
 
     type INode =
+        inherit System.IComparable
         abstract member Name : string
 
     type Distribution =
@@ -88,6 +91,7 @@ module rec Modeling =
         interface INode with
             member x.Name = x.Name
 
+    [<StructuralComparison>]
     type Link = {
         Source : INode
         Sink : INode
@@ -105,6 +109,7 @@ module rec Modeling =
         let mutable maxFlow = 0.0
         member _.Outputs = outputs
         member _.Inputs = inputs
+        member _.MaxFlow = maxFlow
 
         member _.SetMaxFlow x =
             maxFlow <- x
@@ -114,6 +119,7 @@ module rec Modeling =
         let mutable conversionRate = 1.0
         member _.Outputs = outputs
         member _.Inputs = inputs
+        member _.ConversionRate = conversionRate
 
         member _.SetConversionRate x =
             conversionRate <- x
@@ -126,6 +132,8 @@ module rec Modeling =
         let mutable fillRate = 0.0
         member _.Outputs = outputs
         member _.Inputs = inputs
+        member _.Level = level
+        member _.MaxLevel = maxLevel
 
         member _.SetMaxLevel newMaxLevel =
             maxLevel <- newMaxLevel
@@ -183,6 +191,8 @@ module rec Modeling =
 
         member _.Outputs = outputs
         member _.Inputs = inputs
+        member _.MaxVelocity = currentMaxVelocity
+        member _.CurrentLoad = currentLoad
 
 
         member _.Step (elapsedTime: float) =
@@ -230,12 +240,15 @@ module rec Modeling =
 
 
     let private createInitialNetworkState (links: Link list) =
+        let links = HashSet()
+        
         let nodes, nodeInputs, nodeOutputs =
             let nodeInputs = Dictionary<INode, HashSet<Link>>()
             let nodeOutputs = Dictionary<INode, HashSet<Link>>()
             let nodes = HashSet<INode>()
             
             for link in links do
+                links.Add link
                 nodes.Add link.Source
                 nodes.Add link.Sink
 
@@ -291,19 +304,19 @@ module rec Modeling =
                 conveyors.[conveyor] <- conveyorState
             | _ -> invalidArg (nameof node) "Unsupported node type in network"
 
-        (conversions, conveyors, tanks, valves)
+        (links, conversions, conveyors, tanks, valves)
 
 
-    type NetworkState (conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
+    type NetworkState (links: HashSet<Link>, conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
+        member _.Links = links
         member _.Conversions = conversions
         member _.Conveyors = conveyors
         member _.Tanks = tanks
         member _.Valves = valves
         
         new (links: Link list) =
-            let conversions, conveyors, tanks, valves = createInitialNetworkState links
-            NetworkState (conversions, conveyors, tanks, valves)
-
+            let links, conversions, conveyors, tanks, valves = createInitialNetworkState links
+            NetworkState (links, conversions, conveyors, tanks, valves)
 
         member this.Step (elapsedTime: float) =
             for KeyValue (tank, tankState) in this.Tanks do
@@ -320,62 +333,91 @@ module rec Modeling =
             for KeyValue (conveyor, conveyorState) in this.Conveyors do
                 conveyorState.Update flows
 
-    //module NetworkState =
 
-    //    let empty () =
-    //        {
-    //            Valves = Dictionary ()
-    //            Conversions = Dictionary ()
-    //            Tanks = Dictionary ()
-    //            Conveyors = Dictionary ()
-    //        }
+    module NetworkState =
+        open Flips
+        open Flips.Types
+
+        let private createDecisions (ns: NetworkState) =
+            DecisionBuilder "Flow" {
+                for link in ns.Links ->
+                    Continuous (0.0, infinity)
+            } |> dict
+
+        let private createTankConstraints (decisions: IDictionary<Link, Decision>) (ns: NetworkState) =
+            List.choose id [
+                for KeyValue (tank, tankState) in ns.Tanks ->
+                    if tankState.Level >= tankState.MaxLevel then
+                        let inputExpr = List.sum [for input in tankState.Inputs -> 1.0 * decisions.[input]]
+                        let outputExpr = List.sum [for output in tankState.Outputs -> 1.0 * decisions.[output]]
+                        Constraint.create $"Tank_{tank.Name}_Full" (inputExpr <== outputExpr)
+                        |> Some
+                    elif tankState.Level <= 0.0 then
+                        let inputExpr = List.sum [for input in tankState.Inputs -> 1.0 * decisions.[input]]
+                        let outputExpr = List.sum [for output in tankState.Outputs -> 1.0 * decisions.[output]]
+                        Constraint.create $"Tank_{tank.Name}_Empty" (inputExpr <== outputExpr)
+                        |> Some
+                    else
+                        None
+            ]
+
+        let private createValveConstraints (decisions: IDictionary<Link, Decision>) (ns: NetworkState) =
+            List.concat [
+                for KeyValue (valve, valveState) in ns.Valves ->
+                    let inputExpr = List.sum [for input in valveState.Inputs -> 1.0 * decisions.[input]]
+                    let outputExpr = List.sum [for output in valveState.Outputs -> 1.0 * decisions.[output]]
+
+                    let maxFlowConstraint = Constraint.create $"Valve_{valve.Name}_MaxFlow" (outputExpr <== valveState.MaxFlow)
+                    let materialBalanceConstraint = Constraint.create $"Valve_{valve.Name}_MaterialBalance" (inputExpr == outputExpr)
+                    [maxFlowConstraint; materialBalanceConstraint]
+            ]
+
+        let private createConversionConstraints (decisions: IDictionary<Link, Decision>) (ns: NetworkState) =
+            [for KeyValue (conversion, conversionState) in ns.Conversions ->
+                let inputExpr = List.sum [for input in conversionState.Inputs -> 1.0 * decisions.[input]]
+                let outputExpr = List.sum [for output in conversionState.Outputs -> 1.0 * decisions.[output]]
+
+                Constraint.create $"Conversion_{conversion.Name}_MaterialBalance" (conversionState.ConversionRate * inputExpr == outputExpr)
+            ]
+
+        let private createConveyorConstraints (decisions: IDictionary<Link, Decision>) (ns: NetworkState) =
+
+            [for KeyValue (conveyor, conveyorState) in ns.Conveyors ->
+                let outputExpr = List.sum [for output in conveyorState.Outputs -> 1.0 * decisions.[output]]
+
+                let maxOutputRate =
+                    match conveyorState.CurrentLoad with
+                    | Some currentLoad -> conveyorState.MaxVelocity * currentLoad.InputRate
+                    | None -> 0.0
+                    
+                Constraint.create $"Conveyor_{conveyor.Name}_Output" (outputExpr <== maxOutputRate)
+            ]
 
 
-    //    let create (links: Link list) =
-    //        let nodes, nodeInputs, nodeOutputs = createInputOutputMapping links
-    //        let result = empty ()
+        let solveFlows (ns: NetworkState) =
+            let decisions = createDecisions ns
+            let tankConstraints = createTankConstraints decisions ns
+            let conveyorConstraints = createConveyorConstraints decisions ns
+            let conversionConstraints = createConversionConstraints decisions ns
+            let valveConstraints = createValveConstraints decisions ns
+            let objectiveExpr =
+                List.sum [for KeyValue(link, decision) in decisions -> 1.0 * decision]
+            let objective = Objective.create "MaxFlow" Maximize objectiveExpr
+            let model =
+                Model.create objective
+                |> Model.addConstraints tankConstraints
+                |> Model.addConstraints conveyorConstraints
+                |> Model.addConstraints conversionConstraints
+                |> Model.addConstraints valveConstraints
 
-    //        for node in nodes do
-    //            let inputs = 
-    //                match nodeInputs.TryGetValue node with
-    //                | true, inputs -> List.ofSeq inputs
-    //                | false, _ -> []
+            let result = Solver.solve Settings.basic model
+            match result with
+            | SolveResult.Optimal sln ->
+                Solution.getValues sln decisions
+            | _ -> failwith "Infeasible Network"
 
-    //            let outputs =
-    //                match nodeOutputs.TryGetValue node with
-    //                | true, outputs -> List.ofSeq outputs
-    //                | false, _ -> []
 
-    //            match node with
-    //            | :? Tank as tank ->
-    //                let tankState = TankState.create inputs outputs
-    //                result.Tanks.[tank] <- tankState
-                
-    //            | :? Valve as valve -> 
-    //                let valveState = ValveState.create inputs outputs
-    //                result.Valves.[valve] <- valveState
-
-    //            | :? Conversion as conversion ->
-    //                let conversionState = ConversionState.create inputs outputs
-    //                result.Conversions.[conversion] <- conversionState
-
-    //            | :? Conveyor as conveyor ->
-    //                let conveyorState = ConveyorState.create inputs outputs
-    //                result.Conveyors.[conveyor] <- conveyorState
-    //            | _ -> invalidArg (nameof node) "Unsupported node type in network"
-
-    //        result
             
-
-    //    let update (elapsedTime: float) (network: NetworkState) =
-            
-    //        for KeyValue (tank, tankState) in network.Tanks do
-    //            let newState = {
-    //                tankState with
-
-    //            }
-            
-
 
 //module Simulation =
 
