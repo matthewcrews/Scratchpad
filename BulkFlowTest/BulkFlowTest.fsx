@@ -31,7 +31,6 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
             None
 
 
-
 module rec Modeling =
 
     type INode =
@@ -102,137 +101,136 @@ module rec Modeling =
                 Sink = sink
             }
 
-    //type TankNode = {
-    //    Inputs : INode list
-    //    Outputs : INode list
-    //}
+    type ValveState (inputs: Link list, outputs: Link list) =
+        let mutable maxFlow = 0.0
+        member _.Outputs = outputs
+        member _.Inputs = inputs
 
-    //type ValveNode = {
-    //    Input : INode
-    //    Output : INode
-    //}
-
-    //type ConversionNode = {
-    //    Input : INode
-    //    Output : INode
-    //}
-
-    //type ConveyorNode = {
-    //    Inputs : INode list
-    //    Output : INode
-    //}
-
-    //type Network = {
-    //    Tanks : TankNode list
-    //    Valves : ValveNode list
-    //    Conversions : ConversionNode list
-    //    Conveyors : ConveyorNode list
-    //}
+        member _.SetMaxFlow x =
+            maxFlow <- x
 
 
-    type ValveStatus =
-        | Open
-        | Closed
-        | Set of maxRate: float
+    type ConversionState (inputs: Link list, outputs: Link list) =
+        let mutable conversionRate = 1.0
+        member _.Outputs = outputs
+        member _.Inputs = inputs
 
-    type ValveState = {
-        Status : ValveStatus
-        Inputs : Link list
-        Outputs : Link list
-    }
+        member _.SetConversionRate x =
+            conversionRate <- x
 
-    module ValveState =
 
-        let create inputs outputs =
-            {
-                Status = ValveStatus.Closed
-                Inputs = inputs
-                Outputs = outputs
-            }
+    type TankState (inputs: Link list, outputs: Link list) =
+        let mutable maxLevel = 0.0
+        let mutable level = 0.0
+        let mutable drainRate = 0.0
+        let mutable fillRate = 0.0
+        member _.Outputs = outputs
+        member _.Inputs = inputs
 
-    type ConversionState = {
-        ConversionRate : float
-        Inputs : Link list
-        Outputs : Link list
-    }
+        member _.SetMaxLevel newMaxLevel =
+            maxLevel <- newMaxLevel
 
-    module ConversionState =
 
-        let create inputs outputs =
-            {
-                ConversionRate = 1.0
-                Inputs = inputs
-                Outputs = outputs
-            }
+        member _.Step (elapsedTime: float) =
+            // Fill the tank for the elapsed time
+            level <- level + (fillRate - drainRate) * elapsedTime
+            // Protect against rounding error
+            if level > maxLevel then
+                level <- maxLevel
 
-    type TankStatus =
-        | Full
-        | Empty
-        | Partial of currentLevel: float
+            // Protect against rounding error
+            if level < 0.0 then
+                level <- 0.0
 
-    type TankState = {
-        //MaxCapacity : float
-        Status : TankStatus
-        DrainRate : float
-        FillRate : float
-        Inputs : Link list
-        Outputs : Link list
-    }
 
-    module TankState =
+        member _.Update (flows: IReadOnlyDictionary<Link, float>) =
 
-        let create inputs outputs =
-            {
-                Status = TankStatus.Empty
-                DrainRate = 0.0
-                FillRate = 0.0
-                Inputs = inputs
-                Outputs = outputs
-            }
+            let newDrainRate =
+                outputs
+                |> List.sumBy (fun link -> flows.[link])
+
+            let newFillRate =
+                inputs
+                |> List.sumBy (fun link -> flows.[link])
+
+            drainRate <- newDrainRate
+            fillRate <- newFillRate
+                
 
     type ConveyorLoad = {
         ConveyorLocation : float
-        ConveyorLoadingVelocity : float
+        LoadingVelocity : float
         InputRate : float
     }
 
-    type ConveyorState = {
-        Inputs : Link list
-        Outputs : Link list
-        CurrentVelocity : float
-        CurrentLocation : float
-        Loads : ResizeArray<ConveyorLoad>
-    }
+    type ConveyorState (inputs: Link list, outputs: Link list) = 
+        let loads = Queue<ConveyorLoad>()
+        let mutable currentInputRate = 0.0
+        let mutable currentMaxVelocity = 0.0
+        let mutable currentVelocity = 0.0
+        let mutable currentLocation = 0.0
+        let mutable currentLoad : ConveyorLoad option = None
 
-    module ConveyorState =
+        let rec moveForward () =
+            if loads.Count > 0 then
+                let next = loads.Peek ()
+                if currentLocation >= next.ConveyorLocation then
+                    currentLoad <- Some next
+                    loads.Dequeue () |> ignore
+                    // We want to move forward until we have caught up to the
+                    // Current Location
+                    moveForward ()
 
-        let create inputs outputs =
-            {
-                Inputs = inputs
-                Outputs = outputs
-                CurrentVelocity = 1.0
-                CurrentLocation = 0.0
-                Loads = ResizeArray()
-            }
+        member _.Outputs = outputs
+        member _.Inputs = inputs
 
-    type NetworkState = {
-        Valves : Dictionary<Valve, ValveState>
-        Conversions : Dictionary<Conversion, ConversionState>
-        Tanks : Dictionary<Tank, TankState>
-        Conveyors : Dictionary<Conveyor, ConveyorState>
-    }
 
-    module NetworkState =
+        member _.Step (elapsedTime: float) =
+            currentLocation <- currentLocation * currentVelocity * elapsedTime
+            moveForward ()
 
-        let empty () =
-            {
-                Valves = Dictionary ()
-                Conversions = Dictionary ()
-                Tanks = Dictionary ()
-                Conveyors = Dictionary ()
-            }
 
-        let private createInputOutputMapping (links: Link list) =
+        member _.Update (flows: IReadOnlyDictionary<Link, float>) =
+
+            // Calculate the amount of flow leaving the Conveyor
+            let outputRate = outputs |> List.sumBy (fun link -> flows.[link])
+
+
+            let newVelocity = 
+                match currentLoad with
+                // If there is a load leaving the Conveyor, calculate the new Velocity
+                | Some currLoad ->
+                    (outputRate / currLoad.InputRate) * currLoad.LoadingVelocity
+                // If there is no load leaving the Conveyor, the Velocity will change to 
+                // the max allowed velocity
+                | None ->
+                    currentMaxVelocity
+
+            let newInputRate = inputs |> List.sumBy (fun link -> flows.[link])
+
+            // If either the Velocity or InputRate change, we need to start a new
+            // loading for the Conveyor
+            if newVelocity <> currentVelocity || newInputRate <> currentInputRate then
+                let newLoad = {
+                    ConveyorLocation = currentLocation
+                    LoadingVelocity = newVelocity
+                    InputRate = newInputRate
+                }
+                loads.Enqueue newLoad
+                currentVelocity <- newVelocity
+                currentInputRate <- newInputRate
+
+
+
+
+
+
+        member _.SetMaxVelocity newMaxVelocity =
+            currentMaxVelocity <- newMaxVelocity
+
+
+    let private createInitialNetworkState (links: Link list) =
+        let nodes, nodeInputs, nodeOutputs =
             let nodeInputs = Dictionary<INode, HashSet<Link>>()
             let nodeOutputs = Dictionary<INode, HashSet<Link>>()
             let nodes = HashSet<INode>()
@@ -259,40 +257,123 @@ module rec Modeling =
 
             nodes, nodeInputs, nodeOutputs
 
-        let create (links: Link list) =
-            let nodes, nodeInputs, nodeOutputs = createInputOutputMapping links
-            let result = empty ()
+        let tanks = Dictionary ()
+        let conversions = Dictionary ()
+        let valves = Dictionary ()
+        let conveyors = Dictionary ()
 
-            for node in nodes do
-                let inputs = 
-                    match nodeInputs.TryGetValue node with
-                    | true, inputs -> List.ofSeq inputs
-                    | false, _ -> []
+        for node in nodes do
+            let inputs = 
+                match nodeInputs.TryGetValue node with
+                | true, inputs -> List.ofSeq inputs
+                | false, _ -> []
 
-                let outputs =
-                    match nodeOutputs.TryGetValue node with
-                    | true, outputs -> List.ofSeq outputs
-                    | false, _ -> []
+            let outputs =
+                match nodeOutputs.TryGetValue node with
+                | true, outputs -> List.ofSeq outputs
+                | false, _ -> []
 
-                match node with
-                | :? Tank as tank ->
-                    let tankState = TankState.create inputs outputs
-                    result.Tanks.[tank] <- tankState
+            match node with
+            | :? Tank as tank ->
+                let tankState = TankState (inputs, outputs)
+                tanks.[tank] <- tankState
+        
+            | :? Valve as valve -> 
+                let valveState = ValveState (inputs, outputs)
+                valves.[valve] <- valveState
+
+            | :? Conversion as conversion ->
+                let conversionState = ConversionState (inputs, outputs)
+                conversions.[conversion] <- conversionState
+
+            | :? Conveyor as conveyor ->
+                let conveyorState = ConveyorState (inputs, outputs)
+                conveyors.[conveyor] <- conveyorState
+            | _ -> invalidArg (nameof node) "Unsupported node type in network"
+
+        (conversions, conveyors, tanks, valves)
+
+
+    type NetworkState (conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
+        member _.Conversions = conversions
+        member _.Conveyors = conveyors
+        member _.Tanks = tanks
+        member _.Valves = valves
+        
+        new (links: Link list) =
+            let conversions, conveyors, tanks, valves = createInitialNetworkState links
+            NetworkState (conversions, conveyors, tanks, valves)
+
+
+        member this.Step (elapsedTime: float) =
+            for KeyValue (tank, tankState) in this.Tanks do
+                tankState.Step elapsedTime
+
+            for KeyValue (conveyor, conveyorState) in this.Conveyors do
+                conveyorState.Step elapsedTime
+
+
+        member this.Update (flows: IReadOnlyDictionary<Link, float>) =
+            for KeyValue (tank, tankState) in this.Tanks do
+                tankState.Update flows
+
+            for KeyValue (conveyor, conveyorState) in this.Conveyors do
+                conveyorState.Update flows
+
+    //module NetworkState =
+
+    //    let empty () =
+    //        {
+    //            Valves = Dictionary ()
+    //            Conversions = Dictionary ()
+    //            Tanks = Dictionary ()
+    //            Conveyors = Dictionary ()
+    //        }
+
+
+    //    let create (links: Link list) =
+    //        let nodes, nodeInputs, nodeOutputs = createInputOutputMapping links
+    //        let result = empty ()
+
+    //        for node in nodes do
+    //            let inputs = 
+    //                match nodeInputs.TryGetValue node with
+    //                | true, inputs -> List.ofSeq inputs
+    //                | false, _ -> []
+
+    //            let outputs =
+    //                match nodeOutputs.TryGetValue node with
+    //                | true, outputs -> List.ofSeq outputs
+    //                | false, _ -> []
+
+    //            match node with
+    //            | :? Tank as tank ->
+    //                let tankState = TankState.create inputs outputs
+    //                result.Tanks.[tank] <- tankState
                 
-                | :? Valve as valve -> 
-                    let valveState = ValveState.create inputs outputs
-                    result.Valves.[valve] <- valveState
+    //            | :? Valve as valve -> 
+    //                let valveState = ValveState.create inputs outputs
+    //                result.Valves.[valve] <- valveState
 
-                | :? Conversion as conversion ->
-                    let conversionState = ConversionState.create inputs outputs
-                    result.Conversions.[conversion] <- conversionState
+    //            | :? Conversion as conversion ->
+    //                let conversionState = ConversionState.create inputs outputs
+    //                result.Conversions.[conversion] <- conversionState
 
-                | :? Conveyor as conveyor ->
-                    let conveyorState = ConveyorState.create inputs outputs
-                    result.Conveyors.[conveyor] <- conveyorState
-                | _ -> invalidArg (nameof node) "Unsupported node type in network"
+    //            | :? Conveyor as conveyor ->
+    //                let conveyorState = ConveyorState.create inputs outputs
+    //                result.Conveyors.[conveyor] <- conveyorState
+    //            | _ -> invalidArg (nameof node) "Unsupported node type in network"
 
-            result
+    //        result
+            
+
+    //    let update (elapsedTime: float) (network: NetworkState) =
+            
+    //        for KeyValue (tank, tankState) in network.Tanks do
+    //            let newState = {
+    //                tankState with
+
+    //            }
             
 
 
@@ -305,7 +386,6 @@ Update cycle
 1) Update the level and TankStatus for each tank
 2) Update the Current Location of Conveyors
     - If location >= first in loads queue, pop the queue
-
 3) Apply change to the network
 4) Solve for the Flows
 5) Update the TankState for each tank with new Fill/Drain rates
