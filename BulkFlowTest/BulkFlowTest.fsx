@@ -38,6 +38,11 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
         else
             None
 
+    member this.Dequeue () =
+        match this.TryDequeue () with
+        | Some v -> v
+        | None -> raise (InvalidOperationException ("There are no elements in the PriorityQueue"))
+
 
 module rec Modeling =
 
@@ -280,7 +285,7 @@ module rec Modeling =
             for listener in this.Listeners do
                 match listener with
                 | Listener.InFlow inFlow -> inFlow.Step (this, ts)
-                | Listener.Time time -> time.Step (ts)
+                | Listener.ElapsedTime time -> time.Step (ts)
                 | _ -> ()
 
 
@@ -542,17 +547,9 @@ module rec Modeling =
         TriggerType : TriggerType
     }
 
-    type Action =
-        | SetMaxLevel of Tank * float
-        | SetMaxFlow of Valve * float
-        | SetMaxVelocity of Conveyor * float
-        | SetConversion of Conversion * float
-        | EmptyTank of Tank
-        | SpawnEvent of EventType
-
     type Step = {
         TriggerType : TriggerType
-        Actions : Action list
+        Action : NetworkState -> unit
     }
 
     type Plan = {
@@ -560,12 +557,11 @@ module rec Modeling =
         Steps : Step list
     }
 
-    type Event = {
+    type Event<'EventType> = {
         Time : DateTime
-        Type : EventType
+        Type : 'EventType
     }
 
-module Simulation =
 
 (*
 Update cycle
@@ -582,31 +578,33 @@ Update cycle
 8) Select next event and set it as the NextNetworkEvent
 
 *)
-    open Modeling
-
 
     [<RequireQualifiedAccess>]
     type StepType =
         | Event of dateTime: DateTime
         | NetworkChange of dateTime: DateTime
 
-    type State (initialId: int, startTime: DateTime, network: Modeling.NetworkState) =
+    type MessageHandler<'Message, 'EventType, 'Facility when 'Facility :> IFacility> = 'Message -> State<'Message, 'EventType, 'Facility> -> unit
+    type EventHandler<'Message, 'EventType, 'Facility when 'Facility :> IFacility> = Event<'EventType> -> State<'Message, 'EventType, 'Facility> -> unit
+
+    type IFacility =
+        abstract member TimeTillNetworkChange : unit -> TimeSpan
+        abstract member StepNetwork : TimeSpan -> Message list
+        abstract member RefreshNetwork : unit -> unit
+
+    type State<'Message, 'EventType, 'Facility when 'Facility :> IFacility> 
+        (initialId: int, 
+         startTime: DateTime, 
+         facility: 'Facility) =
+
         let mutable nextId = initialId
-        let events = PriorityQueue<DateTime, Event> ()
+        let events = PriorityQueue<DateTime, Event<'EventType>> ()
+        let messages = Queue<'Message>()
         let mutable now = startTime
 
-        member val Network = network
-
-        //member this.TryNextEvent () =
-        //    match events.TryDequeue () with
-        //    | Some (nextTime, nextAction) ->
-        //        now <- nextTime
-        //        Some (nextTime, nextAction)
-        //    | None ->
-        //        None
-
-        //member _.AddEvent (time, act) =
-        //    events.Add (time, act)
+        member val Facility = facility
+        member val Events = events
+        member val Messages = messages
 
         member _.NextId
             with get () =
@@ -618,43 +616,113 @@ Update cycle
         member _.SetNow newNow =
             now <- newNow
 
-        member _.GetNextStepTime () =
-            let nextEventTime = events.TryNextPriority () |> Option.defaultValue DateTime.MaxValue
-            let nextNetworkChange = 
-                match Modeling.NetworkState.timeToNetworkChange network with 
-                | x when x = TimeSpan.MaxValue -> DateTime.MaxValue
-                | x -> now + x
+        //member _.GetNextStepTime () =
+        //    let nextEventTime = events.TryNextPriority () |> Option.defaultValue DateTime.MaxValue
+        //    let nextNetworkChange = 
+        //        match Modeling.NetworkState.timeToNetworkChange network with 
+        //        | x when x = TimeSpan.MaxValue -> DateTime.MaxValue
+        //        | x -> now + x
 
-            if nextEventTime < nextNetworkChange then
-                StepType.Event nextEventTime
+        //    if nextEventTime < nextNetworkChange then
+        //        StepType.Event nextEventTime
+        //    else
+        //        StepType.NetworkChange nextNetworkChange
+
+
+    let rec messageLoop (messageHandler: MessageHandler<_,_,_>) (state: State<_,_,_>) =
+        if state.Messages.Count > 0 then
+            let nextMessage = state.Messages.Dequeue ()
+            messageHandler nextMessage state
+            messageLoop messageHandler state
+        else
+            ()
+
+    let rec run (messageHandler: MessageHandler<_,_,_>) (eventHandler: EventHandler<_,_,_>) (maxDateTime: DateTime) (state: State<_,_,_>) =
+        messageLoop messageHandler state
+        
+        let nextEventTime = state.Events.TryNextPriority ()
+        let nextNetworkTime = state.Now + state.Facility.TimeTillNetworkChange ()
+
+        match nextEventTime with
+        | Some nextEventTime ->
+
+            if nextEventTime > maxDateTime && nextNetworkTime > maxDateTime then
+                let elapsedTime = maxDateTime - state.Now
+                state.SetNow maxDateTime
+                state.Facility.StepNetwork elapsedTime
+                |> ignore
+                // We're done at this point
+
+            elif nextEventTime < nextNetworkTime then
+                let elapsedTime = nextEventTime - state.Now
+                state.SetNow nextEventTime
+                let newMessages = state.Facility.StepNetwork elapsedTime
+                for message in newMessages do
+                    state.Messages.Enqueue message
+
+                let nextTime, nextEvent = state.Events.Dequeue ()
+                eventHandler nextEvent state
+
+                // Evaluate network flows
+                state.Facility.RefreshNetwork ()
+                // Recurse
+                run messageHandler eventHandler maxDateTime state
+                
             else
-                StepType.NetworkChange nextNetworkChange
+                // Network change is the next thing. We will 
+                let elapsedTime = nextNetworkTime - state.Now
+                state.SetNow nextNetworkTime
+                let newMessages = state.Facility.StepNetwork elapsedTime
+                for message in newMessages do
+                    state.Messages.Enqueue message
+
+                // Evaluate network flows
+                state.Facility.RefreshNetwork ()
+                // Recurse
+                run messageHandler eventHandler maxDateTime state
+
+        | None ->
+            if nextNetworkTime < maxDateTime then
+                let elapsedTime = nextNetworkTime - state.Now
+                state.SetNow nextNetworkTime
+                let newMessages = state.Facility.StepNetwork elapsedTime
+                for message in newMessages do
+                    state.Messages.Enqueue message
+                // Recurse
+                run messageHandler eventHandler maxDateTime state
+            else
+                let elapsedTime = maxDateTime - state.Now
+                state.SetNow maxDateTime
+                state.Facility.StepNetwork elapsedTime
+                |> ignore
+                // We're done at this point
+                
+        
 
 
-    let rec run (maxDateTime: DateTime) (state: State) =
-        //let timeTillNetworkChange = Modeling.NetworkState.timeToNetworkChange state.Network
-        let nextStep = state.GetNextStepTime ()
+        ////let timeTillNetworkChange = Modeling.NetworkState.timeToNetworkChange state.Network
+        //let nextStep = state.GetNextStepTime ()
 
-        match nextStep with
-        | StepType.Event eventTime when eventTime > maxDateTime ->
-            let elapsedTime = maxDateTime - state.Now
-            state.SetNow maxDateTime
-            state.Network.Step elapsedTime
+        //match nextStep with
+        //| StepType.Event eventTime when eventTime > maxDateTime ->
+        //    let elapsedTime = maxDateTime - state.Now
+        //    state.SetNow maxDateTime
+        //    state.Network.Step elapsedTime
 
-        | StepType.NetworkChange changeTime when changeTime > maxDateTime ->
-            let elapsedTime = maxDateTime - state.Now
-            state.SetNow maxDateTime
-            state.Network.Step elapsedTime
+        //| StepType.NetworkChange changeTime when changeTime > maxDateTime ->
+        //    let elapsedTime = maxDateTime - state.Now
+        //    state.SetNow maxDateTime
+        //    state.Network.Step elapsedTime
 
-        | StepType.Event eventTime ->
-            failwith "We aren't processing events yet"
+        //| StepType.Event eventTime ->
+        //    failwith "We aren't processing events yet"
 
-        | StepType.NetworkChange changeTime ->
-            let elapsedTime = maxDateTime - state.Now
-            state.SetNow maxDateTime
-            state.Network.Step elapsedTime
+        //| StepType.NetworkChange changeTime ->
+        //    let elapsedTime = maxDateTime - state.Now
+        //    state.SetNow maxDateTime
+        //    state.Network.Step elapsedTime
 
-            let newFlows = Modeling.NetworkState.solveFlows state.Network
+        //    let newFlows = Modeling.NetworkState.solveFlows state.Network
             
-            state.Network.Update newFlows
+        //    state.Network.Update newFlows
 
