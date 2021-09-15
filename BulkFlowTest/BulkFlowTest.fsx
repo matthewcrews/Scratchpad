@@ -41,10 +41,6 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
 
 module rec Modeling =
 
-    type INode =
-        inherit System.IComparable
-        abstract member Name : string
-
     type Distribution =
         | Static of float
         | Uniform of min:float * max:float
@@ -56,9 +52,7 @@ module rec Modeling =
 
     type Tank = {
         Name : string
-    } with
-        interface INode with
-            member x.Name = x.Name
+    } 
 
     module Tank =
 
@@ -69,38 +63,34 @@ module rec Modeling =
 
     type Valve = {
         Name : string
-    } with
-        interface INode with
-            member x.Name = x.Name
+    } 
 
     //type Split = {
     //    Name : string
-    //} with
-    //    interface INode with
-    //        member x.Name = x.Name
+    //}
 
     //type Merge = {
     //    Name : string
-    //} with
-    //    interface INode with
-    //        member x.Name = x.Name
+    //}
 
     type Conveyor = {
         Name : string
-    } with
-        interface INode with
-            member x.Name = x.Name
+    } 
 
     type Conversion = {
         Name : string
-    } with
-        interface INode with
-            member x.Name = x.Name
+    } 
 
-    [<StructuralComparison; StructuralEquality>]
+    [<RequireQualifiedAccess>]
+    type Node =
+        | Tank of Tank
+        | Valve of Valve
+        | Conveyor of Conveyor
+        | Conversion of Conversion
+
     type Link = {
-        Source : INode
-        Sink : INode
+        Source : Node
+        Sink : Node
     }
 
     module Link =
@@ -266,14 +256,52 @@ module rec Modeling =
             maxVelocity <- newMaxVelocity
 
 
-    let private createInitialNetworkState (links: Link list) =
-        let links = HashSet()
+    type NetworkState (links: HashSet<Link>, conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
+        member _.Listeners = HashSet<Listener>()
+        member _.Links = links
+        member _.Conversions = conversions
+        member _.Conveyors = conveyors
+        member _.Tanks = tanks
+        member _.Valves = valves
+
         
-        let nodes, nodeInputs, nodeOutputs =
-            let nodeInputs = Dictionary<INode, HashSet<Link>>()
-            let nodeOutputs = Dictionary<INode, HashSet<Link>>()
-            let nodes = HashSet<INode>()
-            
+        new (links: Link list) =
+            let links, conversions, conveyors, tanks, valves = NetworkState.createInitialNetworkState links
+            NetworkState (links, conversions, conveyors, tanks, valves)
+
+
+        member this.Step (ts: TimeSpan, msgQueue: Queue<Message>) =
+            for KeyValue (tank, tankState) in this.Tanks do
+                tankState.Step ts
+
+            for KeyValue (conveyor, conveyorState) in this.Conveyors do
+                conveyorState.Step ts
+
+            for listener in this.Listeners do
+                match listener with
+                | Listener.InFlow inFlow -> inFlow.Step (this, ts)
+                | Listener.Time time -> time.Step (ts)
+                | _ -> ()
+
+
+        member this.Update (flows: IReadOnlyDictionary<Link, float>) =
+            for KeyValue (tank, tankState) in this.Tanks do
+                tankState.Update flows
+
+            for KeyValue (conveyor, conveyorState) in this.Conveyors do
+                conveyorState.Update flows
+
+
+    module NetworkState =
+        open Flips
+        open Flips.Types
+
+        let private createNodeMappings (links: Link list) =
+            let links = HashSet()
+            let nodeInputs = Dictionary<Node, HashSet<Link>>()
+            let nodeOutputs = Dictionary<Node, HashSet<Link>>()
+            let nodes = HashSet<Node>()
+        
             for link in links do
                 links.Add link
                 nodes.Add link.Source
@@ -295,76 +323,46 @@ module rec Modeling =
                     let outputs = HashSet [link]
                     nodeOutputs.[link.Source] <- outputs
 
-            nodes, nodeInputs, nodeOutputs
+            links, nodes, nodeInputs, nodeOutputs
 
-        let tanks = Dictionary ()
-        let conversions = Dictionary ()
-        let valves = Dictionary ()
-        let conveyors = Dictionary ()
+        let createInitialNetworkState (links: Link list) =
+            let links, nodes, nodeInputs, nodeOutputs = createNodeMappings links
 
-        for node in nodes do
-            let inputs = 
-                match nodeInputs.TryGetValue node with
-                | true, inputs -> List.ofSeq inputs
-                | false, _ -> []
+            let tanks = Dictionary ()
+            let conversions = Dictionary ()
+            let valves = Dictionary ()
+            let conveyors = Dictionary ()
 
-            let outputs =
-                match nodeOutputs.TryGetValue node with
-                | true, outputs -> List.ofSeq outputs
-                | false, _ -> []
+            for node in nodes do
+                let inputs = 
+                    match nodeInputs.TryGetValue node with
+                    | true, inputs -> List.ofSeq inputs
+                    | false, _ -> []
 
-            match node with
-            | :? Tank as tank ->
-                let tankState = TankState (inputs, outputs)
-                tanks.[tank] <- tankState
-        
-            | :? Valve as valve -> 
-                let valveState = ValveState (inputs, outputs)
-                valves.[valve] <- valveState
+                let outputs =
+                    match nodeOutputs.TryGetValue node with
+                    | true, outputs -> List.ofSeq outputs
+                    | false, _ -> []
 
-            | :? Conversion as conversion ->
-                let conversionState = ConversionState (inputs, outputs)
-                conversions.[conversion] <- conversionState
+                match node with
+                | Node.Tank tank ->
+                    let tankState = TankState (inputs, outputs)
+                    tanks.[tank] <- tankState
+            
+                | Node.Valve valve -> 
+                    let valveState = ValveState (inputs, outputs)
+                    valves.[valve] <- valveState
 
-            | :? Conveyor as conveyor ->
-                let conveyorState = ConveyorState (inputs, outputs)
-                conveyors.[conveyor] <- conveyorState
-            | _ -> invalidArg (nameof node) "Unsupported node type in network"
+                | Node.Conversion conversion ->
+                    let conversionState = ConversionState (inputs, outputs)
+                    conversions.[conversion] <- conversionState
 
-        (links, conversions, conveyors, tanks, valves)
+                | Node.Conveyor conveyor ->
+                    let conveyorState = ConveyorState (inputs, outputs)
+                    conveyors.[conveyor] <- conveyorState
 
+            (links, conversions, conveyors, tanks, valves)
 
-    type NetworkState (links: HashSet<Link>, conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
-        member _.Links = links
-        member _.Conversions = conversions
-        member _.Conveyors = conveyors
-        member _.Tanks = tanks
-        member _.Valves = valves
-        
-        new (links: Link list) =
-            let links, conversions, conveyors, tanks, valves = createInitialNetworkState links
-            NetworkState (links, conversions, conveyors, tanks, valves)
-
-
-        member this.Step (ts: TimeSpan) =
-            for KeyValue (tank, tankState) in this.Tanks do
-                tankState.Step ts
-
-            for KeyValue (conveyor, conveyorState) in this.Conveyors do
-                conveyorState.Step ts
-
-
-        member this.Update (flows: IReadOnlyDictionary<Link, float>) =
-            for KeyValue (tank, tankState) in this.Tanks do
-                tankState.Update flows
-
-            for KeyValue (conveyor, conveyorState) in this.Conveyors do
-                conveyorState.Update flows
-
-
-    module NetworkState =
-        open Flips
-        open Flips.Types
 
         let private createDecisions (ns: NetworkState) =
             DecisionBuilder "Flow" {
@@ -467,6 +465,105 @@ module rec Modeling =
             else
                 minConveyorTime
             
+    
+    type TankFillListener (trigger: Trigger, tank: Tank, target: float) =
+
+        member _.IsCompleted (ns: NetworkState) =
+            ns.Tanks.[tank].Level >= target
+
+        member _.Trigger = trigger
+
+
+    type TankDrainListener (trigger: Trigger, tank: Tank, target: float) =
+    
+        member _.IsCompleted (ns: NetworkState) =
+            ns.Tanks.[tank].Level <= target
+        
+        member _.Trigger = trigger
+
+
+    type AccumulatedInFlowListener (trigger: Trigger, tank: Tank, targetFlow: float) =
+        let mutable accumulatedFlow = 0.0
+
+        member _.Step (networkState: NetworkState, ts: TimeSpan) =
+            accumulatedFlow <- networkState.Tanks.[tank].FillRate * ts.TotalSeconds
+
+        member _.IsCompleted () =
+            accumulatedFlow >= targetFlow
+
+        member _.Trigger = trigger
+
+
+    type ElapsedTimeListener (trigger: Trigger, timespan: TimeSpan) =
+        let mutable accumulatedTime = TimeSpan ()
+
+        member _.Step (ts: TimeSpan) =
+            accumulatedTime <- accumulatedTime + ts
+
+        member _.IsCompleted () =
+            accumulatedTime >= timespan
+
+        member _.Trigger = trigger
+
+
+    type Listener =
+        | TankFill of TankFillListener
+        | TankDrain of TankDrainListener
+        | InFlow of AccumulatedInFlowListener
+        | ElapsedTime of ElapsedTimeListener
+
+    module Listener =
+
+        let create (trigger: Trigger) =
+            match trigger.TriggerType with
+            | TriggerType.TankFillTo (tank, target) -> Listener.TankFill (TankFillListener (trigger, tank, target))
+            | TriggerType.TankDrainTo (tank, target) -> Listener.TankDrain (TankDrainListener (trigger, tank, target))
+            | TriggerType.AccumulatedInFlow (tank, targetFlow) -> Listener.InFlow (AccumulatedInFlowListener (trigger, tank, targetFlow))
+            | TriggerType.ElapsedTime timeSpan -> Listener.ElapsedTime (ElapsedTimeListener (trigger, timeSpan))
+
+    type Message =
+        | TriggerHit of Trigger
+
+    // This is where you would create events for the Discrete Components
+    type EventType =
+        | ContainerCompleted
+
+
+    type TriggerType =
+        | TankFillTo of tank: Tank * target: float
+        | TankDrainTo of tank: Tank * target: float
+        | AccumulatedInFlow of tank: Tank * totalFlow: float
+        // Will enable later if required
+        //| AccumulatedOutFlow of node: INode * totalFlow: float
+        | ElapsedTime of timespan: TimeSpan
+
+    type Trigger = {
+        Plan : Plan
+        TriggerType : TriggerType
+    }
+
+    type Action =
+        | SetMaxLevel of Tank * float
+        | SetMaxFlow of Valve * float
+        | SetMaxVelocity of Conveyor * float
+        | SetConversion of Conversion * float
+        | EmptyTank of Tank
+        | SpawnEvent of EventType
+
+    type Step = {
+        TriggerType : TriggerType
+        Actions : Action list
+    }
+
+    type Plan = {
+        Name : string
+        Steps : Step list
+    }
+
+    type Event = {
+        Time : DateTime
+        Type : EventType
+    }
 
 module Simulation =
 
@@ -485,15 +582,8 @@ Update cycle
 8) Select next event and set it as the NextNetworkEvent
 
 *)
+    open Modeling
 
-    // This is where you would create events for the Discrete Components
-    type EventType =
-        | Nothing
-
-    type Event = {
-        Time : DateTime
-        Type : EventType
-    }
 
     [<RequireQualifiedAccess>]
     type StepType =
@@ -546,21 +636,25 @@ Update cycle
         let nextStep = state.GetNextStepTime ()
 
         match nextStep with
-        | StepType.Event eventTime when eventTime = DateTime.MaxValue ->
+        | StepType.Event eventTime when eventTime > maxDateTime ->
             let elapsedTime = maxDateTime - state.Now
             state.SetNow maxDateTime
             state.Network.Step elapsedTime
-        | StepType.NetworkChange changeTime when changeTime = DateTime.MaxValue ->
+
+        | StepType.NetworkChange changeTime when changeTime > maxDateTime ->
             let elapsedTime = maxDateTime - state.Now
             state.SetNow maxDateTime
             state.Network.Step elapsedTime
 
         | StepType.Event eventTime ->
             failwith "We aren't processing events yet"
+
         | StepType.NetworkChange changeTime ->
             let elapsedTime = maxDateTime - state.Now
             state.SetNow maxDateTime
             state.Network.Step elapsedTime
+
             let newFlows = Modeling.NetworkState.solveFlows state.Network
+            
             state.Network.Update newFlows
 
