@@ -112,7 +112,7 @@ module rec Modeling =
         member _.Inputs = inputs
         member _.MaxFlow = maxFlow
 
-        member _.SetMaxFlow x =
+        member internal _.SetMaxFlow x =
             maxFlow <- x
 
 
@@ -122,7 +122,7 @@ module rec Modeling =
         member _.Inputs = inputs
         member _.ConversionRate = conversionRate
 
-        member _.SetConversionRate x =
+        member internal _.SetConversionRate x =
             conversionRate <- x
 
 
@@ -135,10 +135,13 @@ module rec Modeling =
         member _.Inputs = inputs
         member _.Level = level
         member _.MaxLevel = maxLevel
-        member _.FillRate = fillRate
-        member _.DrainRate = drainRate
+        member internal _.FillRate = fillRate
+        member internal _.DrainRate = drainRate
 
-        member _.TimeToChange () =
+        member internal _.Empty () =
+            level <- 0.0
+
+        member internal _.TimeToChange () =
             let accumulationRate = fillRate - drainRate
             if accumulationRate > 0.0 then
                 let remainingCapacity = maxLevel - level
@@ -150,11 +153,11 @@ module rec Modeling =
             else
                 TimeSpan.MaxValue
 
-        member _.SetMaxLevel newMaxLevel =
+        member internal _.SetMaxLevel newMaxLevel =
             maxLevel <- newMaxLevel
 
 
-        member _.Step (ts: TimeSpan) =
+        member internal _.Step (ts: TimeSpan) =
             // Fill the tank for the elapsed time
             level <- level + (fillRate - drainRate) * ts.TotalSeconds
             // Protect against rounding error
@@ -166,7 +169,7 @@ module rec Modeling =
                 level <- 0.0
 
 
-        member _.Update (flows: IReadOnlyDictionary<Link, float>) =
+        member internal _.Update (flows: IReadOnlyDictionary<Link, float>) =
 
             let newDrainRate =
                 outputs
@@ -207,9 +210,10 @@ module rec Modeling =
         member _.Outputs = outputs
         member _.Inputs = inputs
         member _.MaxVelocity = maxVelocity
-        member _.CurrentVelocity = velocity
+        //member _.CurrentVelocity = velocity
         member _.CurrentLoad = load
-        member _.TimeToChange () =
+
+        member internal _.TimeToChange () =
             if velocity = 0.0 then
                 TimeSpan.MaxValue
             elif loads.Count = 0 then
@@ -221,12 +225,12 @@ module rec Modeling =
                 TimeSpan (0, 0, remainingTimeSecs)
 
 
-        member _.Step (ts: TimeSpan) =
+        member internal _.Step (ts: TimeSpan) =
             location <- location * velocity * ts.TotalSeconds
             moveForward ()
 
 
-        member _.Update (flows: IReadOnlyDictionary<Link, float>) =
+        member internal _.Update (flows: IReadOnlyDictionary<Link, float>) =
 
             // Calculate the amount of flow leaving the Conveyor
             let outputRate = outputs |> List.sumBy (fun link -> flows.[link])
@@ -257,12 +261,13 @@ module rec Modeling =
                 inputRate <- newInputRate
 
 
-        member _.SetMaxVelocity newMaxVelocity =
+        member internal _.SetMaxVelocity newMaxVelocity =
             maxVelocity <- newMaxVelocity
 
 
     type NetworkState (links: HashSet<Link>, conversions: Dictionary<Conversion, ConversionState>, conveyors: Dictionary<Conveyor, ConveyorState>, tanks: Dictionary<Tank, TankState>, valves: Dictionary<Valve, ValveState>) = 
-        member _.Listeners = HashSet<Listener>()
+        let mutable isDirty = false
+        let listeners = HashSet<Listener>()
         member _.Links = links
         member _.Conversions = conversions
         member _.Conveyors = conveyors
@@ -274,27 +279,76 @@ module rec Modeling =
             let links, conversions, conveyors, tanks, valves = NetworkState.createInitialNetworkState links
             NetworkState (links, conversions, conveyors, tanks, valves)
 
+        member _.SetValveMaxFlow (valve, maxFlow) =
+            valves.[valve].SetMaxFlow maxFlow
+            isDirty <- true
 
-        member this.Step (ts: TimeSpan, msgQueue: Queue<Message>) =
-            for KeyValue (tank, tankState) in this.Tanks do
+        member _.SetConversionRate (conversion, newRate) =
+            conversions.[conversion].SetConversionRate newRate
+            isDirty <- true
+
+        member _.SetTankMaxLevel (tank, maxLevel) =
+            tanks.[tank].SetMaxLevel maxLevel
+            isDirty <- true
+
+        member _.SetConveyorMaxVelocity (conveyor, maxVelocity) =
+            conveyors.[conveyor].SetMaxVelocity maxVelocity
+            isDirty <- true
+
+        member _.EmptyTank tank =
+            tanks.[tank].Empty ()
+            isDirty <- true
+
+
+        member this.Step (ts: TimeSpan) =
+            for KeyValue (tank, tankState) in tanks do
                 tankState.Step ts
 
-            for KeyValue (conveyor, conveyorState) in this.Conveyors do
+            for KeyValue (conveyor, conveyorState) in conveyors do
                 conveyorState.Step ts
 
-            for listener in this.Listeners do
+            // TODO: This needs to return a list of Triggers
+            let mutable triggers = []
+
+            for listener in listeners do
                 match listener with
-                | Listener.InFlow inFlow -> inFlow.Step (this, ts)
-                | Listener.ElapsedTime time -> time.Step (ts)
-                | _ -> ()
+                | Listener.InFlow inFlow -> 
+                    inFlow.Step (this, ts)
+                    if inFlow.IsCompleted () then
+                        listeners.Remove listener
+                        triggers <- inFlow.Trigger :: triggers
+
+                | Listener.ElapsedTime time -> 
+                    time.Step (ts)
+                    if time.IsCompleted () then
+                        listeners.Remove listener
+                        triggers <- time.Trigger :: triggers
+
+                | Listener.TankFill tankFill ->
+                    if tankFill.IsCompleted this then
+                        listeners.Remove listener
+                        triggers <- tankFill.Trigger :: triggers
+
+                | Listener.TankDrain tankDrain ->
+                    if tankDrain.IsCompleted this then
+                        listeners.Remove listener
+                        triggers <- tankDrain.Trigger :: triggers
+
+            triggers
 
 
-        member this.Update (flows: IReadOnlyDictionary<Link, float>) =
-            for KeyValue (tank, tankState) in this.Tanks do
-                tankState.Update flows
+        member this.Refresh () =
+            if isDirty then
+                
+                let flows = NetworkState.solveFlows this
 
-            for KeyValue (conveyor, conveyorState) in this.Conveyors do
-                conveyorState.Update flows
+                for KeyValue (tank, tankState) in tanks do
+                    tankState.Update flows
+
+                for KeyValue (conveyor, conveyorState) in conveyors do
+                    conveyorState.Update flows
+
+                isDirty <- false
 
 
     module NetworkState =
@@ -526,13 +580,6 @@ module rec Modeling =
             | TriggerType.AccumulatedInFlow (tank, targetFlow) -> Listener.InFlow (AccumulatedInFlowListener (trigger, tank, targetFlow))
             | TriggerType.ElapsedTime timeSpan -> Listener.ElapsedTime (ElapsedTimeListener (trigger, timeSpan))
 
-    type Message =
-        | TriggerHit of Trigger
-
-    // This is where you would create events for the Discrete Components
-    type EventType =
-        | ContainerCompleted
-
 
     type TriggerType =
         | TankFillTo of tank: Tank * target: float
@@ -543,18 +590,8 @@ module rec Modeling =
         | ElapsedTime of timespan: TimeSpan
 
     type Trigger = {
-        Plan : Plan
+        Id : int64
         TriggerType : TriggerType
-    }
-
-    type Step = {
-        TriggerType : TriggerType
-        Action : NetworkState -> unit
-    }
-
-    type Plan = {
-        Name : string
-        Steps : Step list
     }
 
     type Event<'EventType> = {
@@ -562,34 +599,13 @@ module rec Modeling =
         Type : 'EventType
     }
 
-
-(*
-Update cycle
-1) Step the level for each tank
-2) Step the Current Location of Conveyors
-    - If location >= first in loads queue, pop the queue
-    - Set new current load
-3) Apply change to the network
-4) Solve for the Flows
-5) Update the TankState for each tank with new Fill/Drain rates
-6) Enqueue new ConveyorLoad, only need to do this if the InputRate or Velocity changes
-
-7) Evaluate next event for Tanks and Conveyors
-8) Select next event and set it as the NextNetworkEvent
-
-*)
-
-    [<RequireQualifiedAccess>]
-    type StepType =
-        | Event of dateTime: DateTime
-        | NetworkChange of dateTime: DateTime
-
+    type TriggerHandler<'Message, 'EventType, 'Facility when 'Facility :> IFacility> = 'Message -> State<'Message, 'EventType, 'Facility> -> unit
     type MessageHandler<'Message, 'EventType, 'Facility when 'Facility :> IFacility> = 'Message -> State<'Message, 'EventType, 'Facility> -> unit
     type EventHandler<'Message, 'EventType, 'Facility when 'Facility :> IFacility> = Event<'EventType> -> State<'Message, 'EventType, 'Facility> -> unit
 
     type IFacility =
         abstract member TimeTillNetworkChange : unit -> TimeSpan
-        abstract member StepNetwork : TimeSpan -> Message list
+        abstract member StepNetwork : TimeSpan -> Trigger list
         abstract member RefreshNetwork : unit -> unit
 
     type State<'Message, 'EventType, 'Facility when 'Facility :> IFacility> 
@@ -616,113 +632,73 @@ Update cycle
         member _.SetNow newNow =
             now <- newNow
 
-        //member _.GetNextStepTime () =
-        //    let nextEventTime = events.TryNextPriority () |> Option.defaultValue DateTime.MaxValue
-        //    let nextNetworkChange = 
-        //        match Modeling.NetworkState.timeToNetworkChange network with 
-        //        | x when x = TimeSpan.MaxValue -> DateTime.MaxValue
-        //        | x -> now + x
 
-        //    if nextEventTime < nextNetworkChange then
-        //        StepType.Event nextEventTime
-        //    else
-        //        StepType.NetworkChange nextNetworkChange
+    module Simulation =
+
+        let rec private messageLoop (messageHandler: MessageHandler<_,_,_>) (state: State<_,_,_>) =
+            if state.Messages.Count > 0 then
+                let nextMessage = state.Messages.Dequeue ()
+                messageHandler nextMessage state
+                messageLoop messageHandler state
 
 
-    let rec messageLoop (messageHandler: MessageHandler<_,_,_>) (state: State<_,_,_>) =
-        if state.Messages.Count > 0 then
-            let nextMessage = state.Messages.Dequeue ()
-            messageHandler nextMessage state
+        let rec run (triggerHandler: TriggerHandler<_,_,_>) (messageHandler: MessageHandler<_,_,_>) (eventHandler: EventHandler<_,_,_>) (maxDateTime: DateTime) (state: State<_,_,_>) =
             messageLoop messageHandler state
-        else
-            ()
-
-    let rec run (messageHandler: MessageHandler<_,_,_>) (eventHandler: EventHandler<_,_,_>) (maxDateTime: DateTime) (state: State<_,_,_>) =
-        messageLoop messageHandler state
         
-        let nextEventTime = state.Events.TryNextPriority ()
-        let nextNetworkTime = state.Now + state.Facility.TimeTillNetworkChange ()
+            let nextEventTime = state.Events.TryNextPriority ()
+            let nextNetworkTime = state.Now + state.Facility.TimeTillNetworkChange ()
 
-        match nextEventTime with
-        | Some nextEventTime ->
+            match nextEventTime with
+            | Some nextEventTime ->
 
-            if nextEventTime > maxDateTime && nextNetworkTime > maxDateTime then
-                let elapsedTime = maxDateTime - state.Now
-                state.SetNow maxDateTime
-                state.Facility.StepNetwork elapsedTime
-                |> ignore
-                // We're done at this point
+                if nextEventTime > maxDateTime && nextNetworkTime > maxDateTime then
+                    let elapsedTime = maxDateTime - state.Now
+                    state.SetNow maxDateTime
+                    state.Facility.StepNetwork elapsedTime
+                    |> ignore
+                    // We're done at this point
 
-            elif nextEventTime < nextNetworkTime then
-                let elapsedTime = nextEventTime - state.Now
-                state.SetNow nextEventTime
-                let newMessages = state.Facility.StepNetwork elapsedTime
-                for message in newMessages do
-                    state.Messages.Enqueue message
+                elif nextEventTime < nextNetworkTime then
+                    let elapsedTime = nextEventTime - state.Now
+                    state.SetNow nextEventTime
+                    let newTriggers = state.Facility.StepNetwork elapsedTime
+                    for trigger in newTriggers do
+                        triggerHandler trigger state
 
-                let nextTime, nextEvent = state.Events.Dequeue ()
-                eventHandler nextEvent state
+                    let nextTime, nextEvent = state.Events.Dequeue ()
+                    eventHandler nextEvent state
 
-                // Evaluate network flows
-                state.Facility.RefreshNetwork ()
-                // Recurse
-                run messageHandler eventHandler maxDateTime state
+                    // Evaluate network flows
+                    state.Facility.RefreshNetwork ()
+                    // Recurse
+                    run triggerHandler messageHandler eventHandler maxDateTime state
                 
-            else
-                // Network change is the next thing. We will 
-                let elapsedTime = nextNetworkTime - state.Now
-                state.SetNow nextNetworkTime
-                let newMessages = state.Facility.StepNetwork elapsedTime
-                for message in newMessages do
-                    state.Messages.Enqueue message
+                else
+                    // Network change is the next thing. We will 
+                    let elapsedTime = nextNetworkTime - state.Now
+                    state.SetNow nextNetworkTime
+                    let newTriggers = state.Facility.StepNetwork elapsedTime
+                    for trigger in newTriggers do
+                        triggerHandler trigger state
 
-                // Evaluate network flows
-                state.Facility.RefreshNetwork ()
-                // Recurse
-                run messageHandler eventHandler maxDateTime state
+                    // Evaluate network flows
+                    state.Facility.RefreshNetwork ()
+                    // Recurse
+                    run triggerHandler messageHandler eventHandler maxDateTime state
 
-        | None ->
-            if nextNetworkTime < maxDateTime then
-                let elapsedTime = nextNetworkTime - state.Now
-                state.SetNow nextNetworkTime
-                let newMessages = state.Facility.StepNetwork elapsedTime
-                for message in newMessages do
-                    state.Messages.Enqueue message
-                // Recurse
-                run messageHandler eventHandler maxDateTime state
-            else
-                let elapsedTime = maxDateTime - state.Now
-                state.SetNow maxDateTime
-                state.Facility.StepNetwork elapsedTime
-                |> ignore
-                // We're done at this point
-                
-        
-
-
-        ////let timeTillNetworkChange = Modeling.NetworkState.timeToNetworkChange state.Network
-        //let nextStep = state.GetNextStepTime ()
-
-        //match nextStep with
-        //| StepType.Event eventTime when eventTime > maxDateTime ->
-        //    let elapsedTime = maxDateTime - state.Now
-        //    state.SetNow maxDateTime
-        //    state.Network.Step elapsedTime
-
-        //| StepType.NetworkChange changeTime when changeTime > maxDateTime ->
-        //    let elapsedTime = maxDateTime - state.Now
-        //    state.SetNow maxDateTime
-        //    state.Network.Step elapsedTime
-
-        //| StepType.Event eventTime ->
-        //    failwith "We aren't processing events yet"
-
-        //| StepType.NetworkChange changeTime ->
-        //    let elapsedTime = maxDateTime - state.Now
-        //    state.SetNow maxDateTime
-        //    state.Network.Step elapsedTime
-
-        //    let newFlows = Modeling.NetworkState.solveFlows state.Network
-            
-        //    state.Network.Update newFlows
+            | None ->
+                if nextNetworkTime < maxDateTime then
+                    let elapsedTime = nextNetworkTime - state.Now
+                    state.SetNow nextNetworkTime
+                    let newMessages = state.Facility.StepNetwork elapsedTime
+                    for message in newMessages do
+                        state.Messages.Enqueue message
+                    // Recurse
+                    run triggerHandler messageHandler eventHandler maxDateTime state
+                else
+                    let elapsedTime = maxDateTime - state.Now
+                    state.SetNow maxDateTime
+                    state.Facility.StepNetwork elapsedTime
+                    |> ignore
+                    // We're done at this point
 
