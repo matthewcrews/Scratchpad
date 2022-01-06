@@ -9,7 +9,7 @@ type PriorityQueue<'Priority, 'Value when 'Priority : equality>() =
     let priorities = SortedSet<'Priority>()
     let queues = Dictionary<'Priority, Queue<'Value>>()
 
-    member _.Add (priority, value) =
+    member _.Enqueue (priority, value) =
         if priorities.Contains priority then
             queues.[priority].Enqueue value
         else
@@ -618,15 +618,22 @@ module rec Modeling =
         let messages = Queue<'Message>()
         let mutable now = startTime
 
-        member val Facility = facility
-        member val Events = events
-        member val Messages = messages
+        // Only directly manipulated by the `run` function
+        member internal _.Messages = messages
+        member internal _.Events = events
 
-        member _.NextId
-            with get () =
-                let next = nextId 
-                nextId <- next + 1
-                next
+        member val Facility = facility
+
+        member _.AddEvent (event: Event<_>) =
+            events.Enqueue (event.Time, event)
+
+        member _.AddMessage message =
+            messages.Enqueue message
+
+        member _.NextId =
+            let next = nextId 
+            nextId <- next + 1
+            next
 
         member _.Now = now
         member _.SetNow newNow =
@@ -651,6 +658,7 @@ module rec Modeling =
             match nextEventTime with
             | Some nextEventTime ->
 
+                // Check that we are still within the desired simulation time period
                 if nextEventTime > maxDateTime && nextNetworkTime > maxDateTime then
                     let elapsedTime = maxDateTime - state.Now
                     state.SetNow maxDateTime
@@ -658,6 +666,7 @@ module rec Modeling =
                     |> ignore
                     // We're done at this point
 
+                // If an Event is going to occur before a network change
                 elif nextEventTime < nextNetworkTime then
                     let elapsedTime = nextEventTime - state.Now
                     state.SetNow nextEventTime
@@ -673,6 +682,7 @@ module rec Modeling =
                     // Recurse
                     run triggerHandler messageHandler eventHandler maxDateTime state
                 
+                // The Network is going to change before an Event occurs
                 else
                     // Network change is the next thing. We will 
                     let elapsedTime = nextNetworkTime - state.Now
@@ -686,7 +696,9 @@ module rec Modeling =
                     // Recurse
                     run triggerHandler messageHandler eventHandler maxDateTime state
 
+            // There are no future events
             | None ->
+                // The Network is changing before the MaxDateTime
                 if nextNetworkTime < maxDateTime then
                     let elapsedTime = nextNetworkTime - state.Now
                     state.SetNow nextNetworkTime
@@ -695,6 +707,8 @@ module rec Modeling =
                         state.Messages.Enqueue message
                     // Recurse
                     run triggerHandler messageHandler eventHandler maxDateTime state
+
+                // There is no change to the State which occurs before the MaxDateTime
                 else
                     let elapsedTime = maxDateTime - state.Now
                     state.SetNow maxDateTime
