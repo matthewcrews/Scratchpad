@@ -73,7 +73,9 @@ myFunction 1 // Error because of the lack of units
 
 // 3. What do you personally like about them?
 // Answer: The guarantees they provide without a performance penalty. Domains that demand correctness
-// but don't want to sacrifice speed. It's easy to write code whith hidden bugs
+// but don't want to sacrifice speed. It's easy to write code whith hidden bugs. Also giving me confidence
+// when working with lots of primitives like int for indexing. Writing low-level code without the UoM
+// would lead to many more bugs.
 
 
 // 4. What do you personally dislike about them?
@@ -82,10 +84,12 @@ myFunction 1 // Error because of the lack of units
 
 let a = 1.0<cm>
 let b = 2.0<cm>
-let r = System.Math.Min (a, b) // Compiler error because Math.Min expects float, not float<cm>
+// Compiler error because Math.Min expects float, not float<cm>
+let r = System.Math.Min (a, b)
 
 // So you end up having to write "wrappers" which are annoying. The performance is the same, if you know
-// what you're doing, but it's annoying
+// what you're doing, but it's annoying. If there was a namespace that had all of these, it would be nice.
+// I've started to compile my own but I don't publish it because I don't want to maintain it 😂
 
 type Math () =
 
@@ -102,3 +106,19 @@ type Math () =
 // 5. What are the "gotchas" that beginners trip over with them?
 // The built-in libraries not having overloads for them so you end up having to write your own wrappers.
 // Wanting to do reflection on them.
+// You can use them in your own types with generics but it can get a little hairy understanding what the
+// compiler is angry about because you can get "hidden" collisions
+
+[<Measure>] type Seed
+[<Measure>] type Grub
+
+// This looks like it's fine but it's not because by the time it turns into IL both of the Eats
+// look exactly the same once you remove the units. From the perspective of the user the methods
+// are different. After compilation, they are not.
+type Chicken () =
+
+    static member Eat (a: float<Seed>) =
+        a + 1.0<Seed>
+
+    static member Eat (a: float<Grub>) =
+        a + 1.0<Grub>
