@@ -2,10 +2,10 @@
 
 // - Checking algebra
 
-[<Measure>] type Inch
+[<Measure>] type kg
 [<Measure>] type cm
 
-let x = 1.0<Inch>
+let x = 1.0<kg>
 let y = 1.0<cm>
 
 let z = x + y // Compiler error
@@ -14,22 +14,20 @@ let z = x + y // Compiler error
 open System
 
 [<Struct>]
-type Row<[<Measure>] 'Measure, 'T>(values: array<'T>) =
+type Row<[<Measure>] 'Measure, 'T>(values: 'T array) =
 
     new (length: int<'Measure>, value: 'T) =
         Row (Array.create (int length) value)
 
-    member row.Values = values
-
-    member row.Item
+    member _.Item
         with get (i: int<'Measure>) =
-            row.Values[int i]
+            values[int i]
 
         and set (index: int<'Measure>) value =
-            row.Values[int index] <- value
+            values[int index] <- value
 
-    member row.Length =
-        LanguagePrimitives.Int32WithMeasure<'Measure> row.Values.Length
+    member _.Length =
+        LanguagePrimitives.Int32WithMeasure<'Measure> values.Length
 
 [<Measure>] type BufferId
 [<Measure>] type Count
