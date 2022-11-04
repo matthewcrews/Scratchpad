@@ -24,29 +24,6 @@ let s3 = s1 + s2
 let s4 = s1 - s2
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // 3. Defining "Constructors"
 
 module Domain =
@@ -69,10 +46,6 @@ module Domain =
 open Domain
 
 let m1 = PackWeight.create 10.0
-
-
-
-
 
 
 // 4. Using them in Custom Types
