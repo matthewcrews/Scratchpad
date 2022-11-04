@@ -90,13 +90,3 @@ let c6 = c1 / c4
 let q1 = 1.0<Cow>
 let q2 = 2.1<Chicken>
 let q3 = q1 + q2 * 1.0<_>
-
-
-
-
-
-
-
-
-
-
