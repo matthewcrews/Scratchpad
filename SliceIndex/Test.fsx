@@ -2,14 +2,12 @@
 
 module Units =
 
+    [<Measure>] type ValueKey
     [<Measure>] type RangeKey
-    [<Measure>] type SkipKey
-    [<Measure>] type RangeSkipKey
 
 
+type ValueKey = int<Units.ValueKey>
 type RangeKey = int<Units.RangeKey>
-type SkipKey = int<Units.SkipKey>
-type RangeSkipKey = int<Units.RangeSkipKey>
 
 
 [<Struct>]
@@ -22,92 +20,58 @@ type Bar<[<Measure>] 'Measure, 'T> (values: 'T[]) =
 
 
 [<Struct>]
-type SkipIterator =
-    {
-        mutable Key : SkipKey
-        NextKey : Bar<Units.SkipKey, SkipKey>
-    }
-    member si.Current = si.Key
-
-    member si.Next () =
-        let nextIndex = si.NextKey[si.Key]
-        if nextIndex > 0<_> then
-            si.Key <- nextIndex
-            Some nextIndex
-        else
-            None
-
-
-[<Struct>]
-type SkipIndex<'T>(startKey: Dictionary<'T, SkipKey>, nextKey: Bar<Units.SkipKey, SkipKey>, values: Bar<Units.SkipKey, 'T>) =
-
-    member _.GetIterator (k: 'T) =
-        let key = startKey[k]
-        {
-            Key = key
-            NextKey = nextKey
-        }
-
-    member _.Contains v = startKey.ContainsKey v
+type SkipIndex<'T> = {
+    StartKeys: Dictionary<'T, ValueKey>
+    NextKey: Bar<Units.ValueKey, ValueKey>
+    Values: Bar<Units.ValueKey, 'T>
+}
 
 module SkipIndex =
 
     let create (values: 'a[]) =
-        let starts = Dictionary()
+        let startKeys = Dictionary()
         let nexts = Array.zeroCreate values.Length
 
         for i = values.Length - 1 downto 0 do
             let value = values[i]
             let index = i * 1<_>
-            match starts.TryGetValue value with
+            match startKeys.TryGetValue value with
             | true, nextIndex ->
                 nexts[i] <- nextIndex
-                starts[value] <- index
+                startKeys[value] <- index
             | false, _ ->
-                starts[value] <- index
+                startKeys[value] <- index
 
-        let values = Bar<Units.SkipKey, _> values
-        let nexts = Bar<Units.SkipKey, SkipKey> nexts
+        let values = Bar<Units.ValueKey, _> values
+        let nextKey = Bar<Units.ValueKey, ValueKey> nexts
 
-        SkipIndex (starts, nexts, values)
-
-
-[<Struct>]
-type Range<[<Measure>] 'Measure> =
-    {
-        Start : int<'Measure>
-        Length : int<'Measure>
-    }
-
-[<Struct>]
-type RangeIterator =
-    {
-        mutable Key : RangeKey
-        MaxKey : RangeKey
-    }
-    member ri.Next () =
-        if ri.Key < ri.MaxKey then
-            ri.Key <- ri.Key + 1<_>
-            Some ri.Key
-        else
-            None
-
-type RangeIndex<'T>(ranges: Dictionary<'T, Range<Units.RangeKey>>, values: Bar<Units.RangeKey, 'T>) =
-
-    member _.GetIterator (k: 'T) =
-        let range = ranges[k]
         {
-            Key = range.Start
-            MaxKey = range.Start + range.Length
+            StartKeys = startKeys
+            NextKey = nextKey
+            Values = values
         }
+
+
+[<Struct>]
+type Range =
+    {
+        Start : ValueKey
+        Length : ValueKey
+    }
+
+[<Struct>]
+type RangeIndex<'T> = {
+    Ranges: Dictionary<'T, Range>
+    Values: Bar<Units.ValueKey, 'T>
+}
 
 module RangeIndex =
 
     let create (values: 'T[]) =
         let ranges = Dictionary()
         let mutable value = values[0]
-        let mutable start = 0<Units.RangeKey>
-        let mutable length = -1<Units.RangeKey>
+        let mutable start = 0<Units.ValueKey>
+        let mutable length = -1<Units.ValueKey>
 
         for i = 0 to values.Length - 1 do
 
@@ -132,9 +96,103 @@ module RangeIndex =
 
         // Store the range
         ranges[value] <- range
+        let values = Bar<Units.ValueKey, _> values
+        
+        {
+            Ranges = ranges
+            Values = values
+        }
 
-        RangeIndex ranges
+          
+[<Struct>]
+type RangeSkipIndex<'T> = {
+    StartRange : Dictionary<'T, RangeKey>
+    Ranges : Bar<Units.RangeKey, Range>
+    NextRange : Bar<Units.RangeKey, RangeKey>
+    Values : Bar<Units.ValueKey, 'T>
+}
+          
+module RangeSkipIndex =
+    
+    let create (values: 'T[]) =
+        let startRange = Dictionary()
+        let ranges = Queue()
+        let prevRangeKeys = Dictionary()
+        let nextRangeKeys = Dictionary()
+        let mutable value = values[0]
+        let mutable start = 0<Units.ValueKey>
+        let mutable length = -1<Units.ValueKey>
+        let mutable rangeKey = 0<Units.RangeKey>
 
+        for i = 0 to values.Length - 1 do
+            let valueKey = i * 1<Units.ValueKey>
+            
+            if values[i] = value then
+                length <- length + valueKey
+            else
+                // Create the new range and add it to the Queue
+                let range = { Start = start; Length = length }
+                ranges.Enqueue range
+                
+                // We check if we have entered a starting range for
+                // this value or not. If we have not, we need to store it
+                if not (startRange.ContainsKey value) then
+                    startRange[value] <- rangeKey
+                    
+                // If we have seen it before, then we need to record an entry
+                // for the NextRange Bar
+                else
+                    let prevRangeKey = prevRangeKeys[value]
+                    nextRangeKeys[prevRangeKey] <- rangeKey
+                    
+                // Record that this is the last RangeKey for this value
+                prevRangeKeys[value] <- rangeKey
+
+                // Reset the mutable values
+                value <- values[i]
+                start <- valueKey
+                length <- 0<_>
+                rangeKey <- rangeKey + 1<_>
+
+
+        // Wrap up the last Range the loop was working on
+        // Create the new range and add it to the Queue
+        let range = { Start = start; Length = length }
+        ranges.Enqueue range
+        
+        // We check if we have entered a starting range for
+        // this value or not. If we have not, we need to store it
+        if not (startRange.ContainsKey value) then
+            startRange[value] <- rangeKey
+            
+        // If we have seen it before, then we need to record an entry
+        // for the NextRange Bar
+        else
+            let prevRangeKey = prevRangeKeys[value]
+            nextRangeKeys[prevRangeKey] <- rangeKey
+        
+
+        // Create the final collections for the Index
+        let ranges =
+            let r = ranges.ToArray()
+            Bar<Units.RangeKey, _> r
+
+        let nextRange =
+            let r = Array.zeroCreate (int ranges.Length)
+            for KeyValue (rangeKey, nextRangeKey) in nextRangeKeys do
+                r[int rangeKey] <- nextRangeKey
+            Bar<Units.RangeKey, _> r
+
+
+        let values = Bar<Units.ValueKey, _> values
+
+        {
+            StartRange = startRange
+            Ranges = ranges
+            NextRange = nextRange
+            Values = values
+        }
+          
                 
 let v = [|
     1
