@@ -71,7 +71,7 @@ module RangeIndex =
         let ranges = Dictionary()
         let mutable value = values[0]
         let mutable start = 0<Units.ValueKey>
-        let mutable length = -1<Units.ValueKey>
+        let mutable length = 0<Units.ValueKey>
 
         for i = 0 to values.Length - 1 do
 
@@ -88,7 +88,7 @@ module RangeIndex =
                 // Reset the mutable values
                 value <- values[i]
                 start <- i * 1<_>
-                length <- 0<_>
+                length <- 1<_>
 
         let range = { Start = start; Length = length }
         if ranges.ContainsKey value then
@@ -121,14 +121,14 @@ module RangeSkipIndex =
         let nextRangeKeys = Dictionary()
         let mutable value = values[0]
         let mutable start = 0<Units.ValueKey>
-        let mutable length = -1<Units.ValueKey>
+        let mutable length = 0<Units.ValueKey>
         let mutable rangeKey = 0<Units.RangeKey>
 
         for i = 0 to values.Length - 1 do
             let valueKey = i * 1<Units.ValueKey>
             
             if values[i] = value then
-                length <- length + valueKey
+                length <- length + 1<_>
             else
                 // Create the new range and add it to the Queue
                 let range = { Start = start; Length = length }
@@ -151,7 +151,7 @@ module RangeSkipIndex =
                 // Reset the mutable values
                 value <- values[i]
                 start <- valueKey
-                length <- 0<_>
+                length <- 1<_>
                 rangeKey <- rangeKey + 1<_>
 
 
@@ -194,22 +194,28 @@ module RangeSkipIndex =
         }
           
                 
+                
+                
 let v = [|
     1
     1
     1
     2
+    2
+    2
     3
-    4
-    4
-    4
-    6
-    6
+    1
+    1
+    2
+    2
+    2
 |]
 
-let sk2 = RangeIndex.create v
-let mutable si2 = sk2.GetIterator 4
-si2.Next()
+let sk2 = RangeSkipIndex.create v
+sk2.Ranges
+sk2.NextRange
+
+
 // let v = [|
 //     1
 //     2
