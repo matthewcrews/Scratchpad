@@ -1,22 +1,52 @@
 module rec Modeling =
 
+    open UnitsOfMeasure
+
 
     type [<Struct>] Decision =
         | Decision of string
-        static member ( + ) (c: float, d: Decision) =
-            LinearExpr.Add (LinearExpr.Constant c, LinearExpr.Decision d)
+        static member ( + ) (f: float, d: Decision) =
+            LinearExpr.Add (LinearExpr.Constant f, LinearExpr.Decision d)
 
-        static member ( + ) (d: Decision, c: float) =
-            LinearExpr.Add (LinearExpr.Decision d, LinearExpr.Constant c)
+        static member ( + ) (d: Decision, f: float) =
+            LinearExpr.Add (LinearExpr.Decision d, LinearExpr.Constant f)
 
         static member ( + ) (lDecision: Decision, rDecision: Decision) =
             LinearExpr.Add (LinearExpr.Decision lDecision, LinearExpr.Decision rDecision)
 
-        static member ( * ) (c: float, d: Decision) =
-            LinearExpr.Product (c, LinearExpr.Decision d)
+        static member ( * ) (f: float, d: Decision) =
+            LinearExpr.Product (f, LinearExpr.Decision d)
 
-        static member ( * ) (d: Decision, c: float) =
-            LinearExpr.Product (c, LinearExpr.Decision d)
+        static member ( * ) (d: Decision, f: float) =
+            LinearExpr.Product (f, LinearExpr.Decision d)
+
+        // Comparisons
+        static member ( <== ) (f: float, d: Decision) =
+            (LinearExpr.Constant f) <== (LinearExpr.Decision d)
+
+        static member ( <== ) (d: Decision, f: float) =
+            (LinearExpr.Decision d) <== (LinearExpr.Constant f)
+
+        static member ( <== ) (lDecision: Decision, rDecision: Decision) =
+            (LinearExpr.Decision lDecision) <== (LinearExpr.Decision rDecision)
+
+        static member ( == ) (f: float, d: Decision) =
+            (LinearExpr.Constant f) == (LinearExpr.Decision d)
+
+        static member ( == ) (d: Decision, f: float) =
+            (LinearExpr.Decision d) == (LinearExpr.Constant f)
+
+        static member ( == ) (lDecision: Decision, rDecision: Decision) =
+            (LinearExpr.Decision lDecision) == (LinearExpr.Decision rDecision)
+
+        static member ( >== ) (f: float, d: Decision) =
+            (LinearExpr.Constant f) >== (LinearExpr.Decision d)
+
+        static member ( >== ) (d: Decision, f: float) =
+            (LinearExpr.Decision d) >== (LinearExpr.Constant f)
+
+        static member ( >== ) (lDecision: Decision, rDecision: Decision) =
+            (LinearExpr.Decision lDecision) >== (LinearExpr.Decision rDecision)
 
 
     type [<Struct>] Constraint = Constraint of string
@@ -25,6 +55,7 @@ module rec Modeling =
         | Integer of lower: int * upper: int
         | Continuous of lower: float * upper: float
         | Unbounded
+
 
     [<RequireQualifiedAccess>]
     type LinearExpr =
@@ -72,14 +103,63 @@ module rec Modeling =
             | _, _ ->
                 Add (lExpr, Product (-1.0, rExpr))
 
-        static member ( * ) (c: float, expr: LinearExpr) =
-            if c = 0.0 then
+        static member ( * ) (f: float, expr: LinearExpr) =
+            if f = 0.0 then
                 Constant 0.0
             else
-                Product (c, expr)
+                Product (f, expr)
 
-        static member ( * ) (expr: LinearExpr, c: float) =
-            c * expr
+        static member ( * ) (expr: LinearExpr, f: float) =
+            f * expr
+
+        // Comparisons
+        // Less Or Equals
+        static member ( <== ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+            Relation.LessOrEquals (lExpr, rExpr)
+
+        static member ( <== ) (f: float, expr: LinearExpr) =
+            (LinearExpr.Constant f) <== expr
+
+        static member ( <== ) (expr: LinearExpr, f: float) =
+            expr <== (LinearExpr.Constant f)
+
+        static member ( <== ) (d: Decision, expr: LinearExpr) =
+            (LinearExpr.Decision d) <== expr
+
+        static member ( <== ) (expr: LinearExpr, d: Decision) =
+            expr <== (LinearExpr.Decision d)
+
+        // Equals
+        static member ( == ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+            Relation.Equals (lExpr, rExpr)
+
+        static member ( == ) (f: float, expr: LinearExpr) =
+            (LinearExpr.Constant f) == expr
+
+        static member ( == ) (expr: LinearExpr, f: float) =
+            expr == (LinearExpr.Constant f)
+
+        static member ( == ) (d: Decision, expr: LinearExpr) =
+            (LinearExpr.Decision d) == expr
+
+        static member ( == ) (expr: LinearExpr, d: Decision) =
+            expr == (LinearExpr.Decision d)
+
+        // Greater or Equals
+        static member ( >== ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+            Relation.GreaterOrEquals (lExpr, rExpr)
+
+        static member ( >== ) (f: float, expr: LinearExpr) =
+            (LinearExpr.Constant f) >== expr
+
+        static member ( >== ) (expr: LinearExpr, f: float) =
+            expr >== (LinearExpr.Constant f)
+
+        static member ( >== ) (d: Decision, expr: LinearExpr) =
+            (LinearExpr.Decision d) >== expr
+
+        static member ( >== ) (expr: LinearExpr, d: Decision) =
+            expr >== (LinearExpr.Decision d)
 
 
     [<RequireQualifiedAccess>]
@@ -116,13 +196,13 @@ module rec Modeling =
             }
 
         static member create (name, sense, expression) =
-            Model.create (name, sense, expression, [], [])
+            Model.create (ModelName name, sense, expression, [], [])
 
     module Model =
 
         let addConstraint (c, relation) model =
             { model with
-                Constraints = struct (c, relation) :: model.Constraints }
+                Constraints = struct (Constraint c, relation) :: model.Constraints }
 
         let addConstraints constraints model =
 
@@ -130,7 +210,7 @@ module rec Modeling =
                 match constraints with
                 | [] -> acc
                 |  (c, relation)::tail ->
-                    let acc = (struct (c, relation))::acc
+                    let acc = (struct (Constraint c, relation))::acc
                     loop acc tail
 
             let newConstraints = loop model.Constraints constraints
@@ -513,7 +593,15 @@ module ORTools =
         }
 
 
+open Modeling
 
+let x1 = Decision "Chicken"
+let x2 = Decision "Cow"
+let objExpr = 1.0 * x1 + 1.0 * x2
+
+let m =
+    Model.create ("Test", Maximize, objExpr)
+    |> Model.addConstraint ("Chicken Limit", x1 <== 10.0)
 
 
 
