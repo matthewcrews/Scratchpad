@@ -50,6 +50,7 @@ module rec Modeling =
 
 
     type [<Struct>] Constraint = Constraint of string
+
     type Bounds =
         | Binary
         | Integer of lower: int * upper: int
@@ -218,7 +219,7 @@ module rec Modeling =
             { model with
                 Constraints = newConstraints }
 
-        let addBound decision bounds model =
+        let addBound (decision, bounds) model =
             { model with
                 DecisionBounds = struct (decision, bounds) :: model.DecisionBounds }
 
@@ -444,10 +445,10 @@ module ORTools =
         {
             Duration_ms: int64
             WriteLPFile: option<string>
-            WriteMPSFile: option<string>
             EnableOutput: bool
         }
 
+    [<RequireQualifiedAccess>]
     type SolveResult =
         | Optimal
         | Infeasible
@@ -541,7 +542,6 @@ module ORTools =
 
         settings.WriteLPFile
         |> Option.iter (fun lpFile ->
-            // Add Objective Name for multi-objective
             let fullFile = $"{lpFile}.lp"
             let lpString = solver.ExportModelAsLpFormat false
             System.IO.File.WriteAllText (fullFile, lpString)
@@ -579,7 +579,9 @@ module ORTools =
                 SolveResult.Unbounded
 
             | Solver.ResultStatus.ABNORMAL
-            | Solver.ResultStatus.MODEL_INVALID
+            | Solver.ResultStatus.MODEL_INVALID ->
+                SolveResult.Unknown
+
             | Solver.ResultStatus.FEASIBLE
             | Solver.ResultStatus.NOT_SOLVED
             | _ ->
@@ -602,7 +604,18 @@ let objExpr = 1.0 * x1 + 1.0 * x2
 let m =
     Model.create ("Test", Maximize, objExpr)
     |> Model.addConstraint ("Chicken Limit", x1 <== 10.0)
+    |> Model.addConstraint ("Cow Limit", x2 <== 5.0)
+    |> Model.addConstraint ("AnimalLimit", 2.0*x1 + 3.0*x2 <== 30.0)
+    |> Model.addBound (x1, Continuous (0.0, 100.0))
+    |> Model.addBound (x2, Continuous (0.0, 100.0))
 
+let settings : ORTools.Settings = {
+    Duration_ms = 1_000L
+    WriteLPFile = None
+    EnableOutput = true
+}
+
+let s = ORTools.solve settings m
 
 
 //
