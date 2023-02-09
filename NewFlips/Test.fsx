@@ -114,7 +114,7 @@ module rec Modeling =
 
         // Comparisons
         // Less Or Equals
-        static member ( <== ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+        static member ( <== ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.LessOrEquals (lExpr, rExpr)
 
         static member ( <== ) (f: float, expr: LinearExpr) =
@@ -130,7 +130,7 @@ module rec Modeling =
             expr <== (LinearExpr.Decision d)
 
         // Equals
-        static member ( == ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+        static member ( == ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.Equals (lExpr, rExpr)
 
         static member ( == ) (f: float, expr: LinearExpr) =
@@ -146,7 +146,7 @@ module rec Modeling =
             expr == (LinearExpr.Decision d)
 
         // Greater or Equals
-        static member ( >== ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+        static member ( >== ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.GreaterOrEquals (lExpr, rExpr)
 
         static member ( >== ) (f: float, expr: LinearExpr) =
