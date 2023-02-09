@@ -1,16 +1,5 @@
-module rec Domain =
+module rec Modeling =
 
-    open System.Collections.Generic
-    open System.Collections.ObjectModel
-
-    type SignInsenstiveComparer private () =
-        static let instance = SignInsenstiveComparer ()
-        static member Instance = instance
-        interface IComparer<float> with 
-            member _.Compare (a:float, b:float) =
-                let aAbs = System.Math.Abs a
-                let bAbs = System.Math.Abs b
-                aAbs.CompareTo bAbs
 
 
     type [<Struct>] Decision =
@@ -32,14 +21,11 @@ module rec Domain =
 
 
     type [<Struct>] Constraint = Constraint of string
-    type [<Struct>] Objective = Objective of string
     type [<Struct>] Bounds =
         {
             Lower: float
             Upper: float
         }
-
-
 
     [<RequireQualifiedAccess>]
     type LinearExpr =
@@ -87,24 +73,110 @@ module rec Domain =
         static member ( * ) (expr: LinearExpr, c: float) =
             c * expr
 
-    
-    type [<Struct>] ReducedExpr =
+
+    [<RequireQualifiedAccess>]
+    type Relation =
+        | Equals of lExpr: LinearExpr * rExpr: LinearExpr
+        | LessOrEquals of lExpr: LinearExpr * rExpr: LinearExpr
+        | GreaterOrEquals of lExpr: LinearExpr * rExpr: LinearExpr
+
+    type [<Struct>] ObjectiveSense =
+        | Minimize
+        | Maximize
+
+    type [<Struct>] Objective =
+        {
+            Name: string
+            Sense: ObjectiveSense
+            Expression: LinearExpr
+        }
+
+    type [<Struct>] Model =
+        {
+            Name: string
+            Objectives: list<Objective>
+            Constraints: list<struct (Constraint * Relation)>
+            Bounds: list<struct (Decision * Bounds)>
+        }
+        static member create (name, objectives, constraints, bounds) =
+            {
+                Name = name
+                Objectives = objectives
+                Constraints = constraints
+                Bounds = bounds
+            }
+
+        static member create name =
+            Model.create (name, [], [], [])
+
+    module Model =
+
+        let addObjective objective model =
+            { model with
+                Objectives = objective :: model.Objectives }
+
+        let addConstraint c model =
+            { model with
+                Constraints = c :: model.Constraints }
+
+        let addConstraints constraints model =
+            { model with
+                Constraints = constraints @ model.Constraints }
+
+        let addBound bound model =
+            { model with
+                Bounds = bound :: model.Bounds }
+
+        let addBounds bounds model =
+            { model with
+                Bounds = bounds @ model.Bounds }
+
+
+    module UnitsOfMeasure =
+
+        type [<Struct>] Decision<[<Measure>] 'Measure> =
+            | Value of Modeling.Decision
+
+        type [<Struct>] LinearExpr<[<Measure>] 'Measure> =
+            | Value of Modeling.LinearExpr
+
+        type [<Struct>] Objective<[<Measure>] 'Measure> =
+            | Value of Modeling.Objective
+
+
+module Mapping =
+
+    open System.Collections.Generic
+    open System.Collections.ObjectModel
+
+    type SignInsenstiveComparer private () =
+        static let instance = SignInsenstiveComparer ()
+        static member Instance = instance
+        interface IComparer<float> with 
+            member _.Compare (a:float, b:float) =
+                let aAbs = System.Math.Abs a
+                let bAbs = System.Math.Abs b
+                aAbs.CompareTo bAbs
+
+
+    type [<Struct>] LinearExpr =
         {
             Offset: float
-            Coefficients: ReadOnlyDictionary<Decision, float>
+            Coefficients: ReadOnlyDictionary<Modeling.Decision, float>
         }
-        static member ofLinearExpr (expr: LinearExpr) =
+        static member ofModeling (expr: Modeling.LinearExpr) =
 
-            let rec loop (multiplier: float, offsets: ResizeArray<float>, coefficients: Dictionary<Decision, ResizeArray<float>>) (expr: LinearExpr) cont =
+            let rec loop (multiplier: float, offsets: ResizeArray<float>, coefficients: Dictionary<Modeling.Decision, ResizeArray<float>>) (expr: Modeling.LinearExpr) cont =
                 match expr with
-                | LinearExpr.Constant c ->
+                | Modeling.LinearExpr.Constant c ->
                     offsets.Add (multiplier * c)
                     cont (multiplier, offsets, coefficients)
 
-                | LinearExpr.Decision d ->
+                | Modeling.LinearExpr.Decision d ->
                     match coefficients.TryGetValue d with
                     | true, decisionCoefficients -> 
                         decisionCoefficients.Add multiplier
+
                     | false, _ ->
                         let newDecisionCoefficients = ResizeArray()
                         newDecisionCoefficients.Add multiplier
@@ -112,10 +184,10 @@ module rec Domain =
 
                     cont (multiplier, offsets, coefficients)
 
-                | LinearExpr.Product (coefficient, expr) ->
+                | Modeling.LinearExpr.Product (coefficient, expr) ->
                     loop ((coefficient * multiplier), offsets, coefficients) expr cont
 
-                | LinearExpr.Add (lExpr, rExpr) ->
+                | Modeling.LinearExpr.Add (lExpr, rExpr) ->
                     loop (multiplier, offsets, coefficients) lExpr (fun (_, offsets, coefficients) -> loop (multiplier, offsets, coefficients) rExpr cont)
 
 
@@ -140,7 +212,107 @@ module rec Domain =
                 Coefficients = ReadOnlyDictionary resultCoefficients
             }
 
-open Domain
+    [<RequireQualifiedAccess>]
+    type [<Struct>] RelationType =
+        | Equals
+        | LessOrEquals
+        | GreaterOrEquals
+
+    type Constraint =
+        {
+            Name: string
+            Relation: RelationType
+            LeftExpr: LinearExpr
+            RightExpr: LinearExpr
+        }
+
+    module Constraint =
+
+        let ofModeling (struct (Modeling.Constraint name, relation: Modeling.Relation)) =
+            let relationType, lExpr, rExpr =
+                match relation with
+                | Modeling.Relation.Equals (lExpr, rExpr) ->
+                    let newLExpr = LinearExpr.ofModeling lExpr
+                    let newRExpr = LinearExpr.ofModeling rExpr
+                    RelationType.Equals, newLExpr, newRExpr
+
+                | Modeling.Relation.LessOrEquals (lExpr, rExpr) ->
+                    let newLExpr = LinearExpr.ofModeling lExpr
+                    let newRExpr = LinearExpr.ofModeling rExpr
+                    RelationType.LessOrEquals, newLExpr, newRExpr
+
+                | Modeling.Relation.GreaterOrEquals (lExpr, rExpr) ->
+                    let newLExpr = LinearExpr.ofModeling lExpr
+                    let newRExpr = LinearExpr.ofModeling rExpr
+                    RelationType.GreaterOrEquals, newLExpr, newRExpr
+            { Name = name; Relation = relationType; LeftExpr = lExpr; RightExpr = rExpr }
+
+    type [<Struct>] ObjectiveSense =
+        | Maximize
+        | Minimize
+
+    module ObjectiveSense =
+
+        let ofModeling (s: Modeling.ObjectiveSense) =
+            match s with
+            | Modeling.ObjectiveSense.Maximize ->
+                Maximize
+            | Modeling.ObjectiveSense.Minimize ->
+                Minimize
+
+    type [<Struct>] Objective =
+        {
+            Name: string
+            Sense: ObjectiveSense
+            Expr: LinearExpr
+        }
+
+    module Objective =
+
+        let ofModeling (objective: Modeling.Objective) =
+            let newExpr = LinearExpr.ofModeling objective.Expression
+            let newSense = ObjectiveSense.ofModeling objective.Sense
+            { Name = objective.Name; Expr = newExpr; Sense = newSense }
+
+    type Model =
+        {
+            Name: string
+            Objectives: Objective[]
+            Constraints: Constraint[]
+            Bounds: ReadOnlyDictionary<Modeling.Decision, Modeling.Bounds>
+        }
+
+    module Model =
+
+        let ofModeling (model: Modeling.Model) =
+            let objectives = Stack()
+            let constraints = Stack()
+            let decisionBounds = Dictionary()
+
+            for objective in model.Objectives do
+                let newObjective = Objective.ofModeling objective
+                objectives.Push newObjective
+
+            for entry in model.Constraints do
+                let newConstraint = Constraint.ofModeling entry
+                constraints.Push newConstraint
+
+            for struct (decision, bounds) in model.Bounds do
+                decisionBounds[decision] <- bounds
+
+            {
+                Name = model.Name
+                Objectives = objectives.ToArray()
+                Constraints = constraints.ToArray()
+                Bounds = ReadOnlyDictionary decisionBounds
+            }
+
+
+#r "nuget: Google.OrTools, 9.5.2237"
+
+
+
+open Modeling
 
 let d1 = Decision "Chicken"
 let d2 = Decision "Cow"
