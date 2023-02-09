@@ -1,7 +1,6 @@
 module rec Modeling =
 
 
-
     type [<Struct>] Decision =
         | Decision of string
         static member ( + ) (c: float, d: Decision) =
@@ -144,15 +143,25 @@ module rec Modeling =
             | Value of Modeling.Objective
 
 
-module Mapping =
+module Solver =
 
     open System.Collections.Generic
     open System.Collections.ObjectModel
 
-    type SignInsenstiveComparer private () =
-        static let instance = SignInsenstiveComparer ()
+    type [<Struct>] Block<'T> (values: 'T[]) =
+
+        member _.Item
+            with inline get i = values[i]
+
+        member inline _.Length = values.Length
+
+    type block<'T> = Block<'T>
+
+
+    type SignInsensitiveComparer private () =
+        static let instance = SignInsensitiveComparer ()
         static member Instance = instance
-        interface IComparer<float> with 
+        interface IComparer<float> with
             member _.Compare (a:float, b:float) =
                 let aAbs = System.Math.Abs a
                 let bAbs = System.Math.Abs b
@@ -174,7 +183,7 @@ module Mapping =
 
                 | Modeling.LinearExpr.Decision d ->
                     match coefficients.TryGetValue d with
-                    | true, decisionCoefficients -> 
+                    | true, decisionCoefficients ->
                         decisionCoefficients.Add multiplier
 
                     | false, _ ->
@@ -197,13 +206,13 @@ module Mapping =
 
             let offset =
                 // Sort to reduce error from float addition
-                offsets.Sort SignInsenstiveComparer.Instance
+                offsets.Sort SignInsensitiveComparer.Instance
                 Seq.sum offsets
 
             let resultCoefficients = Dictionary()
             for KeyValue (decision, decisionCoefficients) in coefficients do
                 // Sort to reduce error from float addition
-                decisionCoefficients.Sort SignInsenstiveComparer.Instance
+                decisionCoefficients.Sort SignInsensitiveComparer.Instance
                 let coefficient = Seq.sum decisionCoefficients
                 resultCoefficients[decision] <- coefficient
 
@@ -277,14 +286,15 @@ module Mapping =
     type Model =
         {
             Name: string
-            Objectives: Objective[]
-            Constraints: Constraint[]
+            Objectives: block<Objective>
+            Constraints: block<Constraint>
             Bounds: ReadOnlyDictionary<Modeling.Decision, Modeling.Bounds>
         }
 
     module Model =
 
         let ofModeling (model: Modeling.Model) =
+            // A Stack is used here on purpose for the correct ordering of Objectives
             let objectives = Stack()
             let constraints = Stack()
             let decisionBounds = Dictionary()
@@ -302,8 +312,8 @@ module Mapping =
 
             {
                 Name = model.Name
-                Objectives = objectives.ToArray()
-                Constraints = constraints.ToArray()
+                Objectives = block (objectives.ToArray())
+                Constraints = block (constraints.ToArray())
                 Bounds = ReadOnlyDictionary decisionBounds
             }
 
@@ -318,10 +328,10 @@ let d1 = Decision "Chicken"
 let d2 = Decision "Cow"
 let e = d1 + d2
 let e1 = 2.0 * d1 + d2
-let r1 = ReducedExpr.ofLinearExpr e1
+let r1 = Solver.LinearExpr.ofModeling e1
 let e2 = 2.0 * (d1 + 2.0 * d2 + 1.0) + 3.0 * (d2)
-let r2 = ReducedExpr.ofLinearExpr e2
+let r2 = Solver.LinearExpr.ofModeling e2
 
 let e3 = 1.0 * d1 + 2.0 * d2
 
-let r3 = ReducedExpr.ofLinearExpr e
+let r3 = Solver.LinearExpr.ofModeling e
