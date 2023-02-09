@@ -20,11 +20,11 @@ module rec Modeling =
 
 
     type [<Struct>] Constraint = Constraint of string
-    type [<Struct>] Bounds =
-        {
-            Lower: float
-            Upper: float
-        }
+    type Bounds =
+        | Binary
+        | Integer of lower: int * upper: int
+        | Continuous of lower: float * upper: float
+        | Unbounded
 
     [<RequireQualifiedAccess>]
     type LinearExpr =
@@ -63,6 +63,15 @@ module rec Modeling =
             | _, _ ->
                 Add (lExpr, rExpr)
 
+        static member ( - ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+            match lExpr, rExpr with
+            | Constant lConstant, _ when lConstant = 0.0 ->
+                rExpr
+            | _, Constant rConstant when rConstant = 0.0 ->
+                lExpr
+            | _, _ ->
+                Add (lExpr, Product (-1.0, rExpr))
+
         static member ( * ) (c: float, expr: LinearExpr) =
             if c = 0.0 then
                 Constant 0.0
@@ -79,56 +88,73 @@ module rec Modeling =
         | LessOrEquals of lExpr: LinearExpr * rExpr: LinearExpr
         | GreaterOrEquals of lExpr: LinearExpr * rExpr: LinearExpr
 
-    type [<Struct>] ObjectiveSense =
+    type [<Struct>] Sense =
         | Minimize
         | Maximize
 
+    type [<Struct>] ModelName = ModelName of string
+
     type [<Struct>] Objective =
         {
-            Name: string
-            Sense: ObjectiveSense
-            Expression: LinearExpr
+            Sense: Sense
+            Expr: LinearExpr
         }
 
     type [<Struct>] Model =
         {
-            Name: string
-            Objectives: list<Objective>
+            Name: ModelName
+            Objective: Objective
             Constraints: list<struct (Constraint * Relation)>
-            Bounds: list<struct (Decision * Bounds)>
+            DecisionBounds: list<struct (Decision * Bounds)>
         }
-        static member create (name, objectives, constraints, bounds) =
+        static member create (name, sense, expression, constraints, bounds) =
             {
                 Name = name
-                Objectives = objectives
+                Objective = { Sense = sense; Expr = expression }
                 Constraints = constraints
-                Bounds = bounds
+                DecisionBounds = bounds
             }
 
-        static member create name =
-            Model.create (name, [], [], [])
+        static member create (name, sense, expression) =
+            Model.create (name, sense, expression, [], [])
 
     module Model =
 
-        let addObjective objective model =
+        let addConstraint (c, relation) model =
             { model with
-                Objectives = objective :: model.Objectives }
-
-        let addConstraint c model =
-            { model with
-                Constraints = c :: model.Constraints }
+                Constraints = struct (c, relation) :: model.Constraints }
 
         let addConstraints constraints model =
-            { model with
-                Constraints = constraints @ model.Constraints }
 
-        let addBound bound model =
-            { model with
-                Bounds = bound :: model.Bounds }
+            let rec loop acc constraints =
+                match constraints with
+                | [] -> acc
+                |  (c, relation)::tail ->
+                    let acc = (struct (c, relation))::acc
+                    loop acc tail
 
-        let addBounds bounds model =
+            let newConstraints = loop model.Constraints constraints
+
             { model with
-                Bounds = bounds @ model.Bounds }
+                Constraints = newConstraints }
+
+        let addBound decision bounds model =
+            { model with
+                DecisionBounds = struct (decision, bounds) :: model.DecisionBounds }
+
+        let addBounds decisionBounds model =
+
+            let rec loop acc decisionBounds =
+                match decisionBounds with
+                | [] -> acc
+                | (decision, bounds)::tail ->
+                    let acc = struct (decision, bounds)::acc
+                    loop acc tail
+
+            let newBounds = loop model.DecisionBounds decisionBounds
+
+            { model with
+                DecisionBounds = newBounds }
 
 
     module UnitsOfMeasure =
@@ -140,23 +166,13 @@ module rec Modeling =
             | Value of Modeling.LinearExpr
 
         type [<Struct>] Objective<[<Measure>] 'Measure> =
-            | Value of Modeling.Objective
+            | Value of Modeling.ModelName
 
 
-module Solver =
+module Reduced =
 
     open System.Collections.Generic
     open System.Collections.ObjectModel
-
-    type [<Struct>] Block<'T> (values: 'T[]) =
-
-        member _.Item
-            with inline get i = values[i]
-
-        member inline _.Length = values.Length
-
-    type block<'T> = Block<'T>
-
 
     type SignInsensitiveComparer private () =
         static let instance = SignInsensitiveComparer ()
@@ -173,7 +189,10 @@ module Solver =
             Offset: float
             Coefficients: ReadOnlyDictionary<Modeling.Decision, float>
         }
-        static member ofModeling (expr: Modeling.LinearExpr) =
+        static member ofModeling
+            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
+            (expr: Modeling.LinearExpr)
+            =
 
             let rec loop (multiplier: float, offsets: ResizeArray<float>, coefficients: Dictionary<Modeling.Decision, ResizeArray<float>>) (expr: Modeling.LinearExpr) cont =
                 match expr with
@@ -182,6 +201,11 @@ module Solver =
                     cont (multiplier, offsets, coefficients)
 
                 | Modeling.LinearExpr.Decision d ->
+                    // Check if we already have bounds for this Decision
+                    // If we do not, set it as unbounded
+                    if not (decisionBounds.ContainsKey d) then
+                        decisionBounds[d] <- Modeling.Bounds.Unbounded
+
                     match coefficients.TryGetValue d with
                     | true, decisionCoefficients ->
                         decisionCoefficients.Add multiplier
@@ -229,109 +253,281 @@ module Solver =
 
     type Constraint =
         {
-            Name: string
-            Relation: RelationType
-            LeftExpr: LinearExpr
-            RightExpr: LinearExpr
+            Name: Modeling.Constraint
+            Coefficients: ReadOnlyDictionary<Modeling.Decision, float>
+            LowerBound: float
+            UpperBound: float
         }
 
     module Constraint =
 
-        let ofModeling (struct (Modeling.Constraint name, relation: Modeling.Relation)) =
-            let relationType, lExpr, rExpr =
+        let ofModeling
+            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
+            (struct (name, relation: Modeling.Relation))
+            =
+
+            let coefficients, lowerBound, upperBound =
                 match relation with
                 | Modeling.Relation.Equals (lExpr, rExpr) ->
-                    let newLExpr = LinearExpr.ofModeling lExpr
-                    let newRExpr = LinearExpr.ofModeling rExpr
-                    RelationType.Equals, newLExpr, newRExpr
+                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let lowerBound = -1.0 * newExpr.Offset
+                    let upperBound = -1.0 * newExpr.Offset
+                    newExpr.Coefficients, lowerBound, upperBound
 
                 | Modeling.Relation.LessOrEquals (lExpr, rExpr) ->
-                    let newLExpr = LinearExpr.ofModeling lExpr
-                    let newRExpr = LinearExpr.ofModeling rExpr
-                    RelationType.LessOrEquals, newLExpr, newRExpr
+                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let lowerBound = System.Double.NegativeInfinity
+                    let upperBound = -1.0 * newExpr.Offset
+                    newExpr.Coefficients, lowerBound, upperBound
 
                 | Modeling.Relation.GreaterOrEquals (lExpr, rExpr) ->
-                    let newLExpr = LinearExpr.ofModeling lExpr
-                    let newRExpr = LinearExpr.ofModeling rExpr
-                    RelationType.GreaterOrEquals, newLExpr, newRExpr
-            { Name = name; Relation = relationType; LeftExpr = lExpr; RightExpr = rExpr }
+                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let lowerBound = -1.0 * newExpr.Offset
+                    let upperBound = System.Double.PositiveInfinity
+                    newExpr.Coefficients, lowerBound, upperBound
 
-    type [<Struct>] ObjectiveSense =
+            { Name = name; Coefficients = coefficients; LowerBound = lowerBound; UpperBound = upperBound }
+
+
+    type [<Struct>] Sense =
         | Maximize
         | Minimize
 
-    module ObjectiveSense =
+    module Sense =
 
-        let ofModeling (s: Modeling.ObjectiveSense) =
+        let ofModeling (s: Modeling.Sense) =
             match s with
-            | Modeling.ObjectiveSense.Maximize ->
+            | Modeling.Sense.Maximize ->
                 Maximize
-            | Modeling.ObjectiveSense.Minimize ->
+            | Modeling.Sense.Minimize ->
                 Minimize
 
     type [<Struct>] Objective =
         {
-            Name: string
-            Sense: ObjectiveSense
+            Sense: Sense
             Expr: LinearExpr
         }
 
     module Objective =
 
-        let ofModeling (objective: Modeling.Objective) =
-            let newExpr = LinearExpr.ofModeling objective.Expression
-            let newSense = ObjectiveSense.ofModeling objective.Sense
-            { Name = objective.Name; Expr = newExpr; Sense = newSense }
+        let ofModeling
+            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
+            (objective: Modeling.Objective)
+            =
+            let newExpr = LinearExpr.ofModeling decisionBounds objective.Expr
+            let newSense = Sense.ofModeling objective.Sense
+            { Expr = newExpr; Sense = newSense }
+
 
     type Model =
         {
             Name: string
-            Objectives: block<Objective>
-            Constraints: block<Constraint>
-            Bounds: ReadOnlyDictionary<Modeling.Decision, Modeling.Bounds>
+            Objective: Objective
+            Constraints: Constraint[]
+            DecisionBounds: ReadOnlyDictionary<Modeling.Decision, Modeling.Bounds>
         }
 
     module Model =
 
         let ofModeling (model: Modeling.Model) =
-            // A Stack is used here on purpose for the correct ordering of Objectives
-            let objectives = Stack()
             let constraints = Stack()
             let decisionBounds = Dictionary()
 
-            for objective in model.Objectives do
-                let newObjective = Objective.ofModeling objective
-                objectives.Push newObjective
-
-            for entry in model.Constraints do
-                let newConstraint = Constraint.ofModeling entry
-                constraints.Push newConstraint
-
-            for struct (decision, bounds) in model.Bounds do
+            for struct (decision, bounds) in model.DecisionBounds do
                 decisionBounds[decision] <- bounds
 
+            let newObjective = Objective.ofModeling decisionBounds model.Objective
+
+            for entry in model.Constraints do
+                let newConstraint = Constraint.ofModeling decisionBounds entry
+                constraints.Push newConstraint
+
+            let (Modeling.ModelName modelName) = model.Name
+
             {
-                Name = model.Name
-                Objectives = block (objectives.ToArray())
-                Constraints = block (constraints.ToArray())
-                Bounds = ReadOnlyDictionary decisionBounds
+                Name = modelName
+                Objective = newObjective
+                Constraints = constraints.ToArray()
+                DecisionBounds = ReadOnlyDictionary decisionBounds
             }
 
 
 #r "nuget: Google.OrTools, 9.5.2237"
 
+module ORTools =
+
+    open System.Collections.Generic
+    open System.Collections.ObjectModel
+    open Google.OrTools.LinearSolver
+
+    type Settings =
+        {
+            Duration_ms: int64
+            WriteLPFile: option<string>
+            WriteMPSFile: option<string>
+            EnableOutput: bool
+        }
+
+    type SolveResult =
+        | Optimal
+        | Infeasible
+        | Unbounded
+        | Unknown
+        | Unsolved
+
+    type Solution =
+        {
+            Result: SolveResult
+            SolutionValues: ReadOnlyDictionary<Modeling.Decision, float>
+            ReducedCosts: ReadOnlyDictionary<Modeling.Decision, float>
+            ObjectiveValue: float
+        }
 
 
-open Modeling
+    module private Helpers =
 
-let d1 = Decision "Chicken"
-let d2 = Decision "Cow"
-let e = d1 + d2
-let e1 = 2.0 * d1 + d2
-let r1 = Solver.LinearExpr.ofModeling e1
-let e2 = 2.0 * (d1 + 2.0 * d2 + 1.0) + 3.0 * (d2)
-let r2 = Solver.LinearExpr.ofModeling e2
+        let createVariables
+            (solver: Solver)
+            (decisionBounds: ReadOnlyDictionary<Modeling.Decision, Modeling.Bounds>) =
+            let variables = Dictionary()
 
-let e3 = 1.0 * d1 + 2.0 * d2
+            for KeyValue (decision, bounds) in decisionBounds do
+                let (Modeling.Decision name) = decision
 
-let r3 = Solver.LinearExpr.ofModeling e
+                let newVar =
+                    match bounds with
+                    | Modeling.Bounds.Binary ->
+                        solver.MakeBoolVar name
+                    | Modeling.Bounds.Integer (lower, upper) ->
+                        solver.MakeIntVar (float lower, float upper, name)
+                    | Modeling.Bounds.Continuous (lower, upper) ->
+                        solver.MakeNumVar (lower, upper, name)
+                    | Modeling.Bounds.Unbounded ->
+                        solver.MakeNumVar (System.Double.NegativeInfinity, System.Double.PositiveInfinity, name)
+
+                variables[decision] <- newVar
+
+            ReadOnlyDictionary variables
+
+
+        let createExpr
+            (variables: ReadOnlyDictionary<Modeling.Decision, Variable>)
+            (expr: Reduced.LinearExpr)
+            =
+
+            let mutable solverExpr = LinearExpr()
+
+            for KeyValue (decision, coefficient) in expr.Coefficients do
+                solverExpr <- solverExpr + (coefficient * variables[decision])
+
+            solverExpr + expr.Offset
+
+
+        let addConstraint
+            (variables: ReadOnlyDictionary<Modeling.Decision, Variable>)
+            (solver: Solver)
+            (reducedConstraint: Reduced.Constraint)
+            =
+
+            let (Modeling.Constraint name) = reducedConstraint.Name
+            let solverConstraint = solver.MakeConstraint (reducedConstraint.LowerBound, reducedConstraint.UpperBound, name)
+            for KeyValue (decision, coefficient) in reducedConstraint.Coefficients do
+                solverConstraint.SetCoefficient (variables[decision], coefficient)
+
+
+    open Helpers
+
+    let solve (settings: Settings) (model: Modeling.Model) : Solution =
+
+        let reducedModel = Reduced.Model.ofModeling model
+
+        let solver = Solver.CreateSolver "GLOP"
+        solver.SetTimeLimit settings.Duration_ms
+        if settings.EnableOutput then
+            solver.EnableOutput()
+
+        let variables = createVariables solver reducedModel.DecisionBounds
+
+        for reducedConstraint in reducedModel.Constraints do
+            addConstraint variables solver reducedConstraint
+
+        let objExpr = createExpr variables reducedModel.Objective.Expr
+
+        match reducedModel.Objective.Sense with
+        | Reduced.Sense.Maximize ->
+            solver.Maximize objExpr
+        | Reduced.Sense.Minimize ->
+            solver.Minimize objExpr
+
+        settings.WriteLPFile
+        |> Option.iter (fun lpFile ->
+            // Add Objective Name for multi-objective
+            let fullFile = $"{lpFile}.lp"
+            let lpString = solver.ExportModelAsLpFormat false
+            System.IO.File.WriteAllText (fullFile, lpString)
+            )
+
+        let resultStatus = solver.Solve()
+
+        let solutionValues =
+            reducedModel.DecisionBounds.Keys
+            |> Seq.map (fun decision ->
+                let solutionValue = variables[decision].SolutionValue()
+                KeyValuePair (decision, solutionValue))
+            |> Dictionary
+            |> ReadOnlyDictionary
+
+        let reducedCosts =
+            reducedModel.DecisionBounds.Keys
+            |> Seq.map (fun decision ->
+                let reducedCost = variables[decision].ReducedCost()
+                KeyValuePair (decision, reducedCost))
+            |> Dictionary
+            |> ReadOnlyDictionary
+
+        let solutionValue = solver.Objective().Value()
+
+        let solveResult =
+            match resultStatus with
+            | Solver.ResultStatus.OPTIMAL ->
+                SolveResult.Optimal
+
+            | Solver.ResultStatus.INFEASIBLE ->
+                SolveResult.Infeasible
+
+            | Solver.ResultStatus.UNBOUNDED ->
+                SolveResult.Unbounded
+
+            | Solver.ResultStatus.ABNORMAL
+            | Solver.ResultStatus.MODEL_INVALID
+            | Solver.ResultStatus.FEASIBLE
+            | Solver.ResultStatus.NOT_SOLVED
+            | _ ->
+                SolveResult.Unsolved
+
+        {
+            Result = solveResult
+            ReducedCosts = reducedCosts
+            SolutionValues = solutionValues
+            ObjectiveValue = solutionValue
+        }
+
+
+
+
+
+
+//
+// open Modeling
+//
+// let d1 = Decision "Chicken"
+// let d2 = Decision "Cow"
+// let e = d1 + d2
+// let e1 = 2.0 * d1 + d2
+// let r1 = Solver.LinearExpr.ofModeling e1
+// let e2 = 2.0 * (d1 + 2.0 * d2 + 1.0) + 3.0 * (d2)
+// let r2 = Solver.LinearExpr.ofModeling e2
+//
+// let e3 = 1.0 * d1 + 2.0 * d2
+//
+// let r3 = Solver.LinearExpr.ofModeling e
