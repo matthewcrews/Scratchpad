@@ -6,47 +6,47 @@ module rec Modeling =
     type [<Struct>] Decision =
         | Decision of string
         static member ( + ) (f: float, d: Decision) =
-            LinearExpr.Add (LinearExpr.Constant f, LinearExpr.Decision d)
+            f + (LinearExpr.Decision d)
 
         static member ( + ) (d: Decision, f: float) =
-            LinearExpr.Add (LinearExpr.Decision d, LinearExpr.Constant f)
+            d + (LinearExpr.Constant f)
 
         static member ( + ) (lDecision: Decision, rDecision: Decision) =
-            LinearExpr.Add (LinearExpr.Decision lDecision, LinearExpr.Decision rDecision)
+            lDecision + (LinearExpr.Decision rDecision)
 
         static member ( * ) (f: float, d: Decision) =
-            LinearExpr.Product (f, LinearExpr.Decision d)
+            f * (LinearExpr.Decision d)
 
         static member ( * ) (d: Decision, f: float) =
-            LinearExpr.Product (f, LinearExpr.Decision d)
+            f * d
 
         // Comparisons
         static member ( <== ) (f: float, d: Decision) =
-            (LinearExpr.Constant f) <== (LinearExpr.Decision d)
+            f <== (LinearExpr.Decision d)
 
         static member ( <== ) (d: Decision, f: float) =
-            (LinearExpr.Decision d) <== (LinearExpr.Constant f)
+            d <== (LinearExpr.Constant f)
 
         static member ( <== ) (lDecision: Decision, rDecision: Decision) =
-            (LinearExpr.Decision lDecision) <== (LinearExpr.Decision rDecision)
+            lDecision <== (LinearExpr.Decision rDecision)
 
         static member ( == ) (f: float, d: Decision) =
-            (LinearExpr.Constant f) == (LinearExpr.Decision d)
+            f == (LinearExpr.Decision d)
 
         static member ( == ) (d: Decision, f: float) =
-            (LinearExpr.Decision d) == (LinearExpr.Constant f)
+            d == (LinearExpr.Constant f)
 
         static member ( == ) (lDecision: Decision, rDecision: Decision) =
-            (LinearExpr.Decision lDecision) == (LinearExpr.Decision rDecision)
+            lDecision == (LinearExpr.Decision rDecision)
 
         static member ( >== ) (f: float, d: Decision) =
-            (LinearExpr.Constant f) >== (LinearExpr.Decision d)
+            f >== (LinearExpr.Decision d)
 
         static member ( >== ) (d: Decision, f: float) =
-            (LinearExpr.Decision d) >== (LinearExpr.Constant f)
+            d >== (LinearExpr.Constant f)
 
         static member ( >== ) (lDecision: Decision, rDecision: Decision) =
-            (LinearExpr.Decision lDecision) >== (LinearExpr.Decision rDecision)
+            lDecision >== (LinearExpr.Decision rDecision)
 
 
     type [<Struct>] Constraint = Constraint of string
@@ -240,14 +240,26 @@ module rec Modeling =
 
     module UnitsOfMeasure =
 
-        type [<Struct>] Decision<[<Measure>] 'Measure> =
-            | Value of Modeling.Decision
+        [<Struct>]
+        type Decision<[<Measure>] 'Measure> =
+            val internal Decision : Modeling.Decision
+            new (name: string) =
+                { Decision = Modeling.Decision name }
 
-        type [<Struct>] LinearExpr<[<Measure>] 'Measure> =
-            | Value of Modeling.LinearExpr
+            static member ( + ) (f: float<'Measure>, d: Decision<'Measure>) =
+                (LinearExpr.Constant (float f)) + (LinearExpr.Decision d.Decision)
 
-        type [<Struct>] Objective<[<Measure>] 'Measure> =
-            | Value of Modeling.ModelName
+        [<Struct>] 
+        type LinearExpr<[<Measure>] 'Measure> =
+            val internal LinearExpr : Modeling.LinearExpr
+            new (linearExpr: Modeling.LinearExpr) =
+                { LinearExpr = linearExpr }
+
+        [<Struct>] 
+        type Objective<[<Measure>] 'Measure> =
+            val internal Objective : Modeling.Objective
+            new (objective: Modeling.Objective) =
+                { Objective = objective}
 
 
 module Reduced =
@@ -325,12 +337,6 @@ module Reduced =
                 Offset = offset
                 Coefficients = ReadOnlyDictionary resultCoefficients
             }
-
-    [<RequireQualifiedAccess>]
-    type [<Struct>] RelationType =
-        | Equals
-        | LessOrEquals
-        | GreaterOrEquals
 
     type Constraint =
         {
@@ -441,9 +447,15 @@ module ORTools =
     open System.Collections.ObjectModel
     open Google.OrTools.LinearSolver
 
+    [<RequireQualifiedAccess>]
+    type Backend =
+        | GLOPS
+        | CBC
+
     type Settings =
         {
             Duration_ms: int64
+            Backend: Backend
             WriteLPFile: option<string>
             EnableOutput: bool
         }
@@ -522,7 +534,13 @@ module ORTools =
 
         let reducedModel = Reduced.Model.ofModeling model
 
-        let solver = Solver.CreateSolver "GLOP"
+        let solver =
+            match settings.Backend with
+            | Backend.GLOPS ->
+                Solver.CreateSolver "GLOP"
+            | Backend.CBC ->
+                Solver.CreateSolver "CBC"
+                
         solver.SetTimeLimit settings.Duration_ms
         if settings.EnableOutput then
             solver.EnableOutput()
@@ -596,21 +614,25 @@ module ORTools =
 
 
 open Modeling
+open Modeling.UnitsOfMeasure
 
-let x1 = Decision "Chicken"
-let x2 = Decision "Cow"
-let objExpr = 1.0 * x1 + 1.0 * x2
+type [<Measure>] Count
+
+let chicken = Decision<Count> "Chicken"
+let cow = Decision<Count> "Cow"
+let objExpr = 1.0 * chicken + 1.0 * cow
 
 let m =
     Model.create ("Test", Maximize, objExpr)
-    |> Model.addConstraint ("Chicken Limit", x1 <== 10.0)
-    |> Model.addConstraint ("Cow Limit", x2 <== 5.0)
-    |> Model.addConstraint ("AnimalLimit", 2.0*x1 + 3.0*x2 <== 30.0)
-    |> Model.addBound (x1, Continuous (0.0, 100.0))
-    |> Model.addBound (x2, Continuous (0.0, 100.0))
+    |> Model.addConstraint ("Chicken Limit", chicken <== 10.0)
+    |> Model.addConstraint ("Cow Limit", cow <== 5.0)
+    |> Model.addConstraint ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0)
+    |> Model.addBound (chicken, Integer (0, 100))
+    |> Model.addBound (cow, Integer (0, 100))
 
 let settings : ORTools.Settings = {
     Duration_ms = 1_000L
+    Backend = ORTools.Backend.CBC
     WriteLPFile = None
     EnableOutput = true
 }
