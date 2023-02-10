@@ -1,7 +1,7 @@
 open System
 open System.Buffers
-open System.Collections.Generic
 open System.Collections.ObjectModel
+open System.Collections.Generic
 
 
 type Math() =
@@ -155,69 +155,90 @@ let bRange = RangeSet.Ranges [|
 let t = RangeSet.intersect aRange bRange
 
 
-type KeyRangesHashIndex<'Key> =
+[<Struct>]
+type RangeSetHashTable<'Key> (d: Dictionary<'Key, RangeSet>) =
+
+    /// WARNING: Public for inlining only
+    member _._values = d
+
+    /// We want an API that allows you to search for an arbitrary
+    /// Key value so that you don't have to be as careful when
+    /// composing models. It will just return an Empty if the
+    /// Key is not present in the Dictionary
+    member inline r.Item
+        with get k =
+            let d = r._values
+            match d.TryGetValue k with
+            | true, rangeSet -> rangeSet
+            | false, _ -> RangeSet.Empty
+
+
+type RangeSetIndex<'Key> =
     {
-        RangeSets: ReadOnlyDictionary<'Key, RangeSet>
-        Values: bar<Index, 'Key>
+        RangeSets: RangeSetHashTable<'Key>
+        Keys: bar<Index, 'Key>
     }
 
 
-// module KeySeriesHashIndex =
+module RangeSetIndex =
 
-//     let create (values: 'T[]) =
-//         let ranges = Dictionary<'T, Queue<_>>()
-//         let mutable value = values[0]
-//         let mutable start = 0<Units.ValueKey>
-//         let mutable length = 0<Units.ValueKey>
+    let create (values: 'T[]) =
+        let ranges = Dictionary<'T, Queue<_>>()
+        let mutable value = values[0]
+        let mutable start = 0<Index>
+        let mutable length = 0<Index>
 
-//         for i = 0 to values.Length - 1 do
-//             let valueKey = i * 1<Units.ValueKey>
+        for i = 0 to values.Length - 1 do
+            let index = i * 1<Index>
 
-//             if values[i] = value then
-//                 length <- length + 1<_>
-//             else
-//                 // Create the new range
-//                 let range =
-//                     {
-//                         Start = start
-//                         Bound = start + length
-//                     }
-//                 // Get the Range queue for the current value
-//                 if not (ranges.ContainsKey value) then
-//                     ranges[value] <- Queue()
+            if values[i] = value then
+                length <- length + 1<_>
+            else
+                // Create the new range
+                let range =
+                    {
+                        Start = start
+                        Length = length
+                    }
+                // Get the Range queue for the current value
+                if not (ranges.ContainsKey value) then
+                    ranges[value] <- Queue()
 
-//                 ranges[ value ].Enqueue range
+                ranges[ value ].Enqueue range
 
-//                 // Reset the mutable values
-//                 value <- values[i]
-//                 start <- valueKey
-//                 length <- 1<_>
+                // Reset the mutable values
+                value <- values[i]
+                start <- index
+                length <- 1<_>
 
-//         // Wrap up the last Range the loop was working on
-//         // Create the new range
-//         let range =
-//             {
-//                 Start = start
-//                 Bound = start + length
-//             }
-//         // Get the Range queue for the current value
-//         if not (ranges.ContainsKey value) then
-//             ranges[value] <- Queue()
+        // Wrap up the last Range the loop was working on
+        // Create the new range
+        let range =
+            {
+                Start = start
+                Length = length
+            }
 
-//         ranges[ value ].Enqueue range
+        // Get the Range queue for the current value
+        if not (ranges.ContainsKey value) then
+            ranges[value] <- Queue()
 
-//         // We now want to turn all of the Queues into Arrays
-//         let valueSeries =
-//             ranges
-//             |> Seq.map (fun (KeyValue (value, ranges)) ->
-//                 let rangeArray = ranges.ToArray()
-//                 KeyValuePair(value, rangeArray))
-//             |> Dictionary
+        ranges[value].Enqueue range
 
-//         {
-//             KeySeriesLookup = ReadOnlyDictionary valueSeries
-//             Values = bar<Units.ValueKey, _> values
-//         }
+        // We now want to turn all of the Queues into Arrays
+        let rangeSets =
+            ranges
+            |> Seq.map (fun (KeyValue (value, ranges)) ->
+                let rangeArray = ranges.ToArray()
+                let rangeSet = RangeSet.Ranges rangeArray
+                KeyValuePair(value, rangeSet))
+            |> Dictionary
+            |> RangeSetHashTable
+
+        {
+            RangeSets = rangeSets
+            Keys = bar<Index, _> values
+        }
 
 
 // [<Struct>]
