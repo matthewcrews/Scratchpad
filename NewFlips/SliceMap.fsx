@@ -271,11 +271,31 @@ type SliceSetEnumerator<'T> =
 
 
 [<Struct>]
-type SliceMap<'a, 'v when 'a: equality>(rangeFilter: RangeFilter, index: RangeSetIndex<'a>, values: bar<Index, 'v>) =
+type SliceMap<'a, 'v
+    when 'a: equality
+    and 'a: comparison>
+    (rangeFilter: RangeFilter, aIndex: RangeSetIndex<'a>, values: bar<Index, 'v>) =
 
-    member _.GetEnumerator() =
-        let keys = index.Keys
-        let lookup index = KeyValuePair (keys[index], values[index])
+    static let createLookup (keys: bar<Index, 'Key>) (values: bar<Index, 'Value>) =
+        fun index ->
+            let key = keys[index]
+            KeyValuePair (key, values[index])
+
+
+    new (pairs: seq<'a * 'v>) =
+        let pairs =
+            pairs
+            |> Array.ofSeq
+            |> Array.distinctBy fst
+            |> Array.sortBy fst
+
+        let keys = pairs |> Array.map fst |> RangeSetIndex.create
+        let values = pairs |> Array.map snd |> bar
+        SliceMap (RangeFilter.All, keys, values)
+
+    member _.GetEnumerator () =
+        let keys = aIndex.Keys
+        let lookup = createLookup keys values
 
         let ranges =
             match rangeFilter with
@@ -283,7 +303,7 @@ type SliceMap<'a, 'v when 'a: equality>(rangeFilter: RangeFilter, index: RangeSe
                 Array.empty
             | RangeFilter.All ->
                 let start = 0<_>
-                let length = index.Keys.Length
+                let length = aIndex.Keys.Length
                 let range = { Start = start; Length = length}
                 [|range|]
             | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
@@ -308,3 +328,13 @@ type SliceMap<'a, 'v when 'a: equality>(rangeFilter: RangeFilter, index: RangeSe
 
     interface IEnumerable<KeyValuePair<'a, 'v>> with
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+
+
+let x = SliceMap [
+    "a", 1
+    "b", 2
+    "c", 3
+]
+
+for KeyValue (k, v) in x do
+    printfn $"[{k}]->{v}"
