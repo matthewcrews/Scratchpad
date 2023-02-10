@@ -34,38 +34,6 @@ type All = All
 
 [<Measure>]
 type private Index
-// module private Units =
-
-//     [<Measure>]
-//     type Index
-
-//     [<Measure>]
-//     type Key
-
-//     [<Measure>]
-//     type RangeIndex
-
-//     [<Measure>]
-//     type ValueKey
-
-//     [<Measure>]
-//     type RangeKey
-
-//     [<Measure>]
-//     type IndexKey
-
-// type ValueKey = int<Units.ValueKey>
-// type RangeKey = int<Units.RangeKey>
-// type IndexKey = int<Units.IndexKey>
-
-
-// [<Struct>]
-// type Range<[<Measure>] 'Measure> =
-//     {
-//         Start: int<'Measure>
-//         // This is the EXCLUSIVE upper bound
-//         Bound: int<'Measure>
-//     }
 
 [<Struct>]
 type Range =
@@ -136,8 +104,6 @@ type RangeSet =
         result
 
 
-
-
 [<Struct; RequireQualifiedAccess>]
 type RangeFilter =
     | Empty
@@ -172,19 +138,6 @@ module RangeFilter =
 
     let intersect (rangeSet: RangeSet) (rangeFilter: RangeFilter) =
         rangeFilter.Intersect rangeSet
-
-
-
-// let aRange = RangeSet.Ranges [|
-//     // { Start = 0<_>; Length = 7<_>}
-// |]
-
-// let bRange = RangeSet.Ranges [|
-//     { Start = 1<_>; Length = 2<_>}
-//     { Start = 5<_>; Length = 20<_>}
-// |]
-
-// let t = aRange.Intersect bRange
 
 
 [<Struct>]
