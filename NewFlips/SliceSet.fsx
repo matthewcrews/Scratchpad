@@ -168,17 +168,23 @@ type RangeFilter =
             else
                 Empty
 
+module RangeFilter =
 
-let aRange = RangeSet.Ranges [|
-    // { Start = 0<_>; Length = 7<_>}
-|]
+    let intersect (rangeSet: RangeSet) (rangeFilter: RangeFilter) =
+        rangeFilter.Intersect rangeSet
 
-let bRange = RangeSet.Ranges [|
-    { Start = 1<_>; Length = 2<_>}
-    { Start = 5<_>; Length = 20<_>}
-|]
 
-let t = aRange.Intersect bRange
+
+// let aRange = RangeSet.Ranges [|
+//     // { Start = 0<_>; Length = 7<_>}
+// |]
+
+// let bRange = RangeSet.Ranges [|
+//     { Start = 1<_>; Length = 2<_>}
+//     { Start = 5<_>; Length = 20<_>}
+// |]
+
+// let t = aRange.Intersect bRange
 
 
 [<Struct>]
@@ -204,6 +210,8 @@ type RangeSetIndex<'Key> =
         RangeSets: RangeSetHashTable<'Key>
         Keys: bar<Index, 'Key>
     }
+    member r.Item
+        with get k = r.RangeSets[k]
 
 
 module RangeSetIndex =
@@ -409,13 +417,13 @@ type SliceSet2D<'a, 'b
 
     member _.Item
         with get (aKey: 'a, _: All) =
-            let newRangeFilter = rangeFilter.Intersect aIndex.RangeSets[aKey]
+            let newRangeFilter = rangeFilter.Intersect aIndex[aKey]
             SliceSet (newRangeFilter, bIndex)
 
 
     member _.Item
         with get (_: All, bKey: 'b) =
-            let newRangeFilter = rangeFilter.Intersect bIndex.RangeSets[bKey]
+            let newRangeFilter = rangeFilter.Intersect bIndex[bKey]
             SliceSet (newRangeFilter, aIndex)
 
 
@@ -427,161 +435,151 @@ type SliceSet2D<'a, 'b
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
-let s1 = SliceSet2D [
-    "a", 1
-    "a", 2
-    "a", 3
-    "b", 1
-    "b", 3
-]
+// let s1 = SliceSet2D [
+//     "a", 1
+//     "a", 2
+//     "a", 3
+//     "b", 1
+//     "b", 3
+// ]
 
-for x in s1[All, 4] do
-    printfn $"{x}"
-
-
-// [<Struct>]
-// type SliceSet3D<'a, 'b, 'c when 'a: equality and 'b: equality and 'c: equality>
-//     (
-//         keyRanges: Series<Units.ValueKey>,
-//         aIndex: ValueIndex<'a>,
-//         bIndex: ValueIndex<'b>,
-//         cIndex: ValueIndex<'c>
-//     ) =
-
-//     new(values: array<'a * 'b * 'c>) =
-//         let values = Array.distinct values
-//         let aValues = values |> Array.map (fun (a, _, _) -> a)
-//         let bValues = values |> Array.map (fun (_, b, _) -> b)
-//         let cValues = values |> Array.map (fun (_, _, c) -> c)
-//         let aIndex = ValueIndex.create aValues
-//         let bIndex = ValueIndex.create bValues
-//         let cIndex = ValueIndex.create cValues
-//         let keyFilter = Series.all values.Length
-//         SliceSet3D(keyFilter, aIndex, bIndex, cIndex)
-
-//     new(values: seq<'a * 'b * 'c>) =
-//         let values = Array.ofSeq values
-//         SliceSet3D values
-
-//     member _.GetEnumerator() =
-//         let aValues = aIndex.Values
-//         let bValues = bIndex.Values
-//         let cValues = cIndex.Values
-
-//         {
-//             CurKeyRangeIdx = 0
-//             CurValueKey = -1<_>
-//             CurValueKeyBound = 0<_>
-//             CurValue = Unchecked.defaultof<struct ('a * 'b * 'c)>
-//             KeyRanges = keyRanges
-//             ValueLookup = fun vk -> struct (aValues[vk], bValues[vk], cValues[vk])
-//         }
+// for x in s1[All, 4] do
+//     printfn $"{x}"
 
 
-//     member s.ToSeq =
-//         let mutable e = s.GetEnumerator()
-//         Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
+[<Struct>]
+type SliceSet3D<'a, 'b, 'c
+    when 'a: equality 
+    and 'a: comparison
+    and 'b: equality
+    and 'b: comparison
+    and 'c: equality
+    and 'c: comparison>
+    (
+        rangeFilter: RangeFilter,
+        aIndex: RangeSetIndex<'a>,
+        bIndex: RangeSetIndex<'b>,
+        cIndex: RangeSetIndex<'c>
+    ) =
+
+    new(values: array<'a * 'b * 'c>) =
+        let values =
+            values
+            |> Array.distinct
+            |> Array.sort
+        let aValues = values |> Array.map (fun (a, _, _) -> a)
+        let bValues = values |> Array.map (fun (_, b, _) -> b)
+        let cValues = values |> Array.map (fun (_, _, c) -> c)
+        let aIndex = RangeSetIndex.create aValues
+        let bIndex = RangeSetIndex.create bValues
+        let cIndex = RangeSetIndex.create cValues
+        let rangeFilter = RangeFilter.All
+        SliceSet3D(rangeFilter, aIndex, bIndex, cIndex)
+
+    new(values: seq<'a * 'b * 'c>) =
+        let values = Array.ofSeq values
+        SliceSet3D values
+
+    member _.GetEnumerator() =
+        let aKeys = aIndex.Keys
+        let bKeys = bIndex.Keys
+        let cKeys = cIndex.Keys
+
+        let ranges =
+            match rangeFilter with
+            | RangeFilter.Empty ->
+                Array.empty
+            | RangeFilter.All ->
+                let start = 0<_>
+                let length = aIndex.Keys.Length
+                let range = { Start = start; Length = length}
+                [|range|]
+            | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
+                ranges
+
+        {
+            CurRangeIndex = 0
+            CurRange = Unchecked.defaultof<_>
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<_>
+            Ranges = ranges
+            ValueLookup = fun vk -> struct (aKeys[vk], bKeys[vk], cKeys[vk])
+        }
 
 
-//     member _.Item
-//         with get (aKey: 'a, bKey: 'b, _: All) =
-
-//             let aSeries =
-//                 match aIndex.ValueSeries.TryGetValue aKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let bSeries =
-//                 match bIndex.ValueSeries.TryGetValue bKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let newKeyRanges = keyRanges |> Series.intersect aSeries |> Series.intersect bSeries
-
-//             SliceSet(newKeyRanges, cIndex)
+    member s.ToSeq =
+        let mutable e = s.GetEnumerator()
+        Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
 
 
-//     member _.Item
-//         with get (aKey: 'a, _: All, cKey: 'c) =
+    member _.Item
+        with get (aKey: 'a, bKey: 'b, _: All) =
 
-//             let aSeries =
-//                 match aIndex.ValueSeries.TryGetValue aKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[aKey]
+                |> RangeFilter.intersect bIndex[bKey]
 
-//             let cSeries =
-//                 match cIndex.ValueSeries.TryGetValue cKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let newKeyRanges = keyRanges |> Series.intersect aSeries |> Series.intersect cSeries
-
-//             SliceSet(newKeyRanges, bIndex)
+            SliceSet(newRangeFilter, cIndex)
 
 
-//     member _.Item
-//         with get (_: All, bKey: 'b, cKey: 'c) =
+    member _.Item
+        with get (aKey: 'a, _: All, cKey: 'c) =
 
-//             let bSeries =
-//                 match bIndex.ValueSeries.TryGetValue bKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[aKey]
+                |> RangeFilter.intersect cIndex[cKey]
 
-//             let cSeries =
-//                 match cIndex.ValueSeries.TryGetValue cKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
+            SliceSet(newRangeFilter, bIndex)
 
-//             let newKeyRanges = keyRanges |> Series.intersect bSeries |> Series.intersect cSeries
+    member _.Item
+        with get (_: All, bKey: 'b, cKey: 'c) =
 
-//             SliceSet(newKeyRanges, aIndex)
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect bIndex[bKey]
+                |> RangeFilter.intersect cIndex[cKey]
 
-
-//     member _.Item
-//         with get (aKey: 'a, _: All, _: All) =
-
-//             let aSeries =
-//                 match aIndex.ValueSeries.TryGetValue aKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let newKeyRanges = keyRanges |> Series.intersect aSeries
-
-//             SliceSet2D(newKeyRanges, bIndex, cIndex)
+            SliceSet(newRangeFilter, aIndex)
 
 
-//     member _.Item
-//         with get (_: All, bKey: 'b, _: All) =
+    member _.Item
+        with get (aKey: 'a, _: All, _: All) =
 
-//             let bSeries =
-//                 match bIndex.ValueSeries.TryGetValue bKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[aKey]
 
-//             let newKeyRanges = keyRanges |> Series.intersect bSeries
-
-//             SliceSet2D(newKeyRanges, aIndex, cIndex)
+            SliceSet2D(newRangeFilter, bIndex, cIndex)
 
 
-//     member _.Item
-//         with get (_: All, _: All, cKey: 'c) =
+    member _.Item
+        with get (_: All, bKey: 'b, _: All) =
 
-//             let cSeries =
-//                 match cIndex.ValueSeries.TryGetValue cKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect bIndex[bKey]
 
-//             let newKeyRanges = keyRanges |> Series.intersect cSeries
-
-//             SliceSet2D(newKeyRanges, aIndex, bIndex)
+            SliceSet2D(newRangeFilter, aIndex, cIndex)
 
 
-//     interface System.Collections.IEnumerable with
-//         member s.GetEnumerator() =
-//             s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+    member _.Item
+        with get (_: All, _: All, cKey: 'c) =
 
-//     interface IEnumerable<struct ('a * 'b * 'c)> with
-//         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect cIndex[cKey]
+
+            SliceSet2D(newRangeFilter, aIndex, bIndex)
+
+
+    interface System.Collections.IEnumerable with
+        member s.GetEnumerator() =
+            s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+
+    interface IEnumerable<struct ('a * 'b * 'c)> with
+        member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
 // [<Struct>]
