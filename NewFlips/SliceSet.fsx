@@ -241,75 +241,79 @@ module RangeSetIndex =
         }
 
 
-// [<Struct>]
-// type SliceSetEnumerator<'T> =
-//     private
-//         {
-//             mutable CurKeyRangeIdx: int
-//             mutable CurValueKey: ValueKey
-//             mutable CurValueKeyBound: ValueKey
-//             mutable CurValue: 'T
-//             KeyRanges: Series<Units.ValueKey>
-//             ValueLookup: ValueKey -> 'T
-//         }
+[<Struct>]
+type SliceSetEnumerator<'T> =
+    private
+        {
+            mutable CurRangeIndex: int
+            mutable CurRange: Range
+            mutable CurIndex: int<Index>
+            mutable CurValue: 'T
+            Ranges: Range[]
+            ValueLookup: int<Index> -> 'T
+        }
 
-//     member e.MoveNext() =
-//         if e.CurValueKey < 0<_> && e.CurKeyRangeIdx < e.KeyRanges.Length then
-//             let curRange = e.KeyRanges[e.CurKeyRangeIdx]
-//             e.CurValueKey <- curRange.Start
-//             e.CurValueKeyBound <- curRange.Bound
-//             e.CurValue <- e.ValueLookup e.CurValueKey
-//             true
-//         else
-//             e.CurValueKey <- e.CurValueKey + 1<_>
+    member e.MoveNext() =
+        if e.CurIndex < 0<_> && e.CurRangeIndex < e.Ranges.Length then
+            e.CurRange <- e.Ranges[e.CurRangeIndex]
+            e.CurIndex <- e.CurRange.Start
+            e.CurValue <- e.ValueLookup e.CurIndex
+            true
+        else
+            e.CurIndex <- e.CurIndex + 1<_>
 
-//             if e.CurValueKey < e.CurValueKeyBound then
-//                 e.CurValue <- e.ValueLookup e.CurValueKey
-//                 true
-//             else
-//                 e.CurKeyRangeIdx <- e.CurKeyRangeIdx + 1
+            if e.CurIndex < e.CurRange.Bound then
+                e.CurValue <- e.ValueLookup e.CurIndex
+                true
+            else
+                e.CurRangeIndex <- e.CurRangeIndex + 1
 
-//                 if e.CurKeyRangeIdx < e.KeyRanges.Length then
-//                     let curRange = e.KeyRanges[e.CurKeyRangeIdx]
-//                     e.CurValueKey <- curRange.Start
-//                     e.CurValueKeyBound <- curRange.Bound
-//                     e.CurValue <- e.ValueLookup e.CurValueKey
-//                     true
-//                 else
-//                     false
+                if e.CurRangeIndex < e.Ranges.Length then
+                    e.CurRange <- e.Ranges[e.CurRangeIndex]
+                    e.CurIndex <- e.CurRange.Start
+                    e.CurValue <- e.ValueLookup e.CurIndex
+                    true
+                else
+                    false
 
-//     member e.Current: 'T =
-//         if e.CurValueKey < 0<_> then
-//             raise (InvalidOperationException "Enumeration has not started. Call MoveNext.")
-//         else
-//             e.CurValue
+    member e.Current: 'T =
+        if e.CurIndex < 0<_> then
+            raise (InvalidOperationException "Enumeration has not started. Call MoveNext.")
+        else
+            e.CurValue
 
 
-// [<Struct>]
-// type SliceSet<'a when 'a: equality>(keyRanges: Series<Units.ValueKey>, index: ValueIndex<'a>) =
+[<Struct>]
+type SliceSet<'a when 'a: equality>(rangeSet: RangeSet, index: RangeSetIndex<'a>) =
 
-//     member _.GetEnumerator() =
-//         let values = index.Values
+    member _.GetEnumerator() =
+        let values = index.Keys
 
-//         {
-//             CurKeyRangeIdx = 0
-//             CurValueKey = -1<_>
-//             CurValueKeyBound = 0<_>
-//             CurValue = Unchecked.defaultof<'a>
-//             KeyRanges = keyRanges
-//             ValueLookup = fun vk -> values[vk]
-//         }
+        let ranges =
+            match rangeSet with
+            | RangeSet.Empty -> Array.empty
+            | RangeSet.Ranges ranges -> ranges
+            | RangeSet.All ->
 
-//     member s.ToSeq =
-//         let mutable e = s.GetEnumerator()
-//         Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
+        {
+            CurRangeIndex = 0
+            CurRange = Unchecked.defaultof<Range>
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<'a>
+            Ranges = ranges
+            ValueLookup = fun vk -> values[vk]
+        }
 
-//     interface System.Collections.IEnumerable with
-//         member s.GetEnumerator() =
-//             s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+    member s.ToSeq =
+        let mutable e = s.GetEnumerator()
+        Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
 
-//     interface IEnumerable<'a> with
-//         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+    interface System.Collections.IEnumerable with
+        member s.GetEnumerator() =
+            s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+
+    interface IEnumerable<'a> with
+        member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
 // [<Struct>]
