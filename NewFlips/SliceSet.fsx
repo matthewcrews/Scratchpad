@@ -78,73 +78,99 @@ type Range =
 
 [<Struct; RequireQualifiedAccess>]
 type RangeSet =
-    | Empty
-    | All
     | Ranges of ranges: Range[]
 
-module RangeSet =
+    static member Empty = Ranges Array.empty
 
-    let all = RangeSet.All
+    member rs.Length =
+        let (Ranges ranges) = rs
+        ranges.Length
 
-    let empty = RangeSet.Empty
+    member a.Intersect (b: RangeSet) =
+        let (Ranges aRanges) = a
+        let (Ranges bRanges) = b
 
-    let intersect (a: RangeSet) (b: RangeSet) : RangeSet =
+        let resultAcc = ArrayPool.Shared.Rent(aRanges.Length + bRanges.Length)
+        let mutable aIdx = 0
+        let mutable bIdx = 0
+        let mutable resultIdx = 0
+        let mutable aRange = Unchecked.defaultof<_>
+        let mutable bRange = Unchecked.defaultof<_>
 
-        match a, b with
-        | RangeSet.Empty, _
-        | _, RangeSet.Empty -> RangeSet.Empty
-        | RangeSet.All, _ -> b
-        | _, RangeSet.All -> a
-        | RangeSet.Ranges aRanges, RangeSet.Ranges bRanges ->
-            let resultAcc = ArrayPool.Shared.Rent(aRanges.Length + bRanges.Length)
-            let mutable aIdx = 0
-            let mutable bIdx = 0
-            let mutable resultIdx = 0
-            let mutable aRange = Unchecked.defaultof<_>
-            let mutable bRange = Unchecked.defaultof<_>
+        while aIdx < aRanges.Length && bIdx < bRanges.Length do
+            aRange <- aRanges[aIdx]
+            bRange <- bRanges[bIdx]
 
-            while aIdx < aRanges.Length && bIdx < bRanges.Length do
-                aRange <- aRanges[aIdx]
-                bRange <- bRanges[bIdx]
+            if bRange.Bound <= aRange.Start then
+                bIdx <- bIdx + 1
+            elif aRange.Bound <= bRange.Start then
+                aIdx <- aIdx + 1
+            else
+                let newStart = Math.max (aRange.Start, bRange.Start)
+                let newLength = Math.min (aRange.Bound, bRange.Bound) - newStart
+                let newRange = { Start = newStart; Length = newLength }
+                resultAcc[resultIdx] <- newRange
+                resultIdx <- resultIdx + 1
 
-                if bRange.Bound <= aRange.Start then
-                    bIdx <- bIdx + 1
-                elif aRange.Bound <= bRange.Start then
+                if aRange.Bound < bRange.Bound then
                     aIdx <- aIdx + 1
                 else
-                    let newStart = Math.max (aRange.Start, bRange.Start)
-                    let newLength = Math.min (aRange.Bound, bRange.Bound) - newStart
-                    let newRange = { Start = newStart; Length = newLength }
-                    resultAcc[resultIdx] <- newRange
-                    resultIdx <- resultIdx + 1
+                    bIdx <- bIdx + 1
 
-                    if aRange.Bound < bRange.Bound then
-                        aIdx <- aIdx + 1
-                    else
-                        bIdx <- bIdx + 1
+        let result = 
+            // Check to see if there were any overlapping Ranges. If there are,
+            // we will write the results out
+            if resultIdx > 0 then
+                // Copy the final results
+                let result = GC.AllocateUninitializedArray resultIdx
+                Array.Copy(resultAcc, result, resultIdx)
+                Ranges result
+            // If there were no overlapping Ranges we just return an
+            // empty RangeSet
+            else
+                Ranges Array.empty
+
+        // Return the rented array
+        ArrayPool.Shared.Return(resultAcc, false)
+        // Return the resuling RangeSet
+        result
 
 
-            let result = 
-                // Check to see if there were any overlapping Ranges. If there are,
-                // we will write the results out
-                if resultIdx > 0 then
-                    // Copy the final results
-                    let result = GC.AllocateUninitializedArray resultIdx
-                    Array.Copy(resultAcc, result, resultIdx)
-                    RangeSet.Ranges result
-                // If there were no overlapping Ranges we just return an
-                // empty RangeSet
-                else
-                    RangeSet.Empty
 
-            // Return the rented array
-            ArrayPool.Shared.Return(resultAcc, false)
-            // Return the resuling RangeSet
-            result
+
+[<Struct; RequireQualifiedAccess>]
+type RangeFilter =
+    | Empty
+    | All
+    | RangeSet of rangeSet: RangeSet
+
+    member a.Intersect (b: RangeFilter) =
+        match a, b with
+        | Empty, _
+        | _, Empty -> Empty
+        | All, _ -> b
+        | _, All -> a
+        | RangeSet aRangesSet, RangeSet bRangeSet ->
+            let result = aRangesSet.Intersect bRangeSet
+            if result.Length > 0 then
+                RangeSet result
+            else
+                Empty
+
+    member a.Intersect (b: RangeSet) =
+        match a with
+        | Empty -> Empty
+        | All -> RangeSet b
+        | RangeSet aRangeSet ->
+            let result = aRangeSet.Intersect b
+            if result.Length > 0 then
+                RangeSet result
+            else
+                Empty
 
 
 let aRange = RangeSet.Ranges [|
-    { Start = 100<_>; Length = 10<_>}
+    // { Start = 0<_>; Length = 7<_>}
 |]
 
 let bRange = RangeSet.Ranges [|
@@ -152,7 +178,7 @@ let bRange = RangeSet.Ranges [|
     { Start = 5<_>; Length = 20<_>}
 |]
 
-let t = RangeSet.intersect aRange bRange
+let t = aRange.Intersect bRange
 
 
 [<Struct>]
@@ -284,22 +310,28 @@ type SliceSetEnumerator<'T> =
 
 
 [<Struct>]
-type SliceSet<'a when 'a: equality>(rangeSet: RangeSet, index: RangeSetIndex<'a>) =
+type SliceSet<'a when 'a: equality>(rangeFilter: RangeFilter, index: RangeSetIndex<'a>) =
 
     member _.GetEnumerator() =
         let values = index.Keys
 
         let ranges =
-            match rangeSet with
-            | RangeSet.Empty -> Array.empty
-            | RangeSet.Ranges ranges -> ranges
-            | RangeSet.All ->
+            match rangeFilter with
+            | RangeFilter.Empty ->
+                Array.empty
+            | RangeFilter.All ->
+                let start = 0<_>
+                let length = index.Keys.Length
+                let range = { Start = start; Length = length}
+                [|range|]
+            | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
+                ranges
 
         {
             CurRangeIndex = 0
-            CurRange = Unchecked.defaultof<Range>
+            CurRange = Unchecked.defaultof<_>
             CurIndex = -1<_>
-            CurValue = Unchecked.defaultof<'a>
+            CurValue = Unchecked.defaultof<_>
             Ranges = ranges
             ValueLookup = fun vk -> values[vk]
         }
@@ -308,97 +340,103 @@ type SliceSet<'a when 'a: equality>(rangeSet: RangeSet, index: RangeSetIndex<'a>
         let mutable e = s.GetEnumerator()
         Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
 
-    interface System.Collections.IEnumerable with
+    interface Collections.IEnumerable with
         member s.GetEnumerator() =
-            s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+            s.ToSeq.GetEnumerator() :> Collections.IEnumerator
 
     interface IEnumerable<'a> with
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
-// [<Struct>]
-// type SliceSet2D<'a, 'b when 'a: equality and 'b: equality>
-//     (
-//         keyRanges: Series<Units.ValueKey>,
-//         aIndex: ValueIndex<'a>,
-//         bIndex: ValueIndex<'b>
-//     ) =
+[<Struct>]
+type SliceSet2D<'a, 'b
+    when 'a: equality 
+    and 'a: comparison
+    and 'b: equality
+    and 'b: comparison>
+    (
+        rangeFilter: RangeFilter,
+        aIndex: RangeSetIndex<'a>,
+        bIndex: RangeSetIndex<'b>
+    ) =
 
-//     new(values: array<'a * 'b>) =
-//         let values = Array.distinct values
-//         let aValues = values |> Array.map fst
-//         let bValues = values |> Array.map snd
-//         let aIndex = ValueIndex.create aValues
-//         let bIndex = ValueIndex.create bValues
-//         let keyFilter = Series.all values.Length
-//         SliceSet2D(keyFilter, aIndex, bIndex)
+    new(values: array<'a * 'b>) =
+        let values =
+            values
+            |> Array.distinct
+            |> Array.sort
+        let aValues = values |> Array.map fst
+        let bValues = values |> Array.map snd
+        let aIndex = RangeSetIndex.create aValues
+        let bIndex = RangeSetIndex.create bValues
+        let rangeFilter = RangeFilter.All
+        SliceSet2D(rangeFilter, aIndex, bIndex)
 
-//     new(values: seq<'a * 'b>) =
-//         let values = values |> Array.ofSeq
-//         SliceSet2D values
+    new(values: seq<'a * 'b>) =
+        let values = values |> Array.ofSeq
+        SliceSet2D values
 
-//     member _.GetEnumerator() =
-//         let aValues = aIndex.Values
-//         let bValues = bIndex.Values
+    member _.GetEnumerator() =
+        let aKeys = aIndex.Keys
+        let bKeys = bIndex.Keys
 
-//         {
-//             CurKeyRangeIdx = 0
-//             CurValueKey = -1<_>
-//             CurValueKeyBound = 0<_>
-//             CurValue = Unchecked.defaultof<struct ('a * 'b)>
-//             KeyRanges = keyRanges
-//             ValueLookup = fun vk -> struct (aValues[vk], bValues[vk])
-//         }
+        let ranges =
+            match rangeFilter with
+            | RangeFilter.Empty ->
+                Array.empty
+            | RangeFilter.All ->
+                let start = 0<_>
+                let length = aIndex.Keys.Length
+                let range = { Start = start; Length = length}
+                [|range|]
+            | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
+                ranges
 
-
-//     member s.ToSeq =
-//         let mutable e = s.GetEnumerator()
-//         Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
-
-
-//     member _.Item
-//         with get (aKey: 'a, _: All) =
-
-//             let aSeries =
-//                 match aIndex.ValueSeries.TryGetValue aKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let newKeyRanges = keyRanges |> Series.intersect aSeries
-
-//             SliceSet(newKeyRanges, bIndex)
-
-
-//     member _.Item
-//         with get (_: All, bKey: 'b) =
-
-//             let bSeries =
-//                 match bIndex.ValueSeries.TryGetValue bKey with
-//                 | true, s -> s
-//                 | false, _ -> Series.empty
-
-//             let newKeyRanges = keyRanges |> Series.intersect bSeries
-
-//             SliceSet(newKeyRanges, aIndex)
+        {
+            CurRangeIndex = 0
+            CurRange = Unchecked.defaultof<_>
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<_>
+            Ranges = ranges
+            ValueLookup = fun vk -> struct (aKeys[vk], bKeys[vk])
+        }
 
 
-//     interface System.Collections.IEnumerable with
-//         member s.GetEnumerator() =
-//             s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
-
-//     interface IEnumerable<struct ('a * 'b)> with
-//         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+    member s.ToSeq =
+        let mutable e = s.GetEnumerator()
+        Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
 
 
-// module Slice2 =
+    member _.Item
+        with get (aKey: 'a, _: All) =
+            let newRangeFilter = rangeFilter.Intersect aIndex.RangeSets[aKey]
+            SliceSet (newRangeFilter, bIndex)
 
-//     let inline sumBy ([<InlineIfLambda>] f) (slice: SliceSet2D<'a, 'b>) =
-//         let mutable acc = LanguagePrimitives.GenericZero
 
-//         for a, b in slice do
-//             acc <- acc + (f a b)
+    member _.Item
+        with get (_: All, bKey: 'b) =
+            let newRangeFilter = rangeFilter.Intersect bIndex.RangeSets[bKey]
+            SliceSet (newRangeFilter, aIndex)
 
-//         acc
+
+    interface System.Collections.IEnumerable with
+        member s.GetEnumerator() =
+            s.ToSeq.GetEnumerator() :> System.Collections.IEnumerator
+
+    interface IEnumerable<struct ('a * 'b)> with
+        member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+
+
+let s1 = SliceSet2D [
+    "a", 1
+    "a", 2
+    "a", 3
+    "b", 1
+    "b", 3
+]
+
+for x in s1[All, 4] do
+    printfn $"{x}"
 
 
 // [<Struct>]
