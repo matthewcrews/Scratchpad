@@ -766,6 +766,7 @@ open Modeling
 open Modeling.UnitsOfMeasure
 
 type [<Measure>] Count
+type [<Measure>] Size
 
 let chicken = Decision<Count> "Chicken"
 let cow = Decision<Count> "Cow"
