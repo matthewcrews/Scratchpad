@@ -240,26 +240,162 @@ module rec Modeling =
 
     module UnitsOfMeasure =
 
+        type Bounds<[<Measure>] 'Measure> =
+            | Binary
+            | Integer of lower: int<'Measure> * upper: int<'Measure>
+            | Continuous of lower: float<'Measure> * upper: float<'Measure>
+            | Unbounded
+
+
+
         [<Struct>]
         type Decision<[<Measure>] 'Measure> =
-            val internal Decision : Modeling.Decision
+            val internal Value : Modeling.Decision
             new (name: string) =
-                { Decision = Modeling.Decision name }
+                { Value = Modeling.Decision name }
 
-            static member ( + ) (f: float<'Measure>, d: Decision<'Measure>) =
-                (LinearExpr.Constant (float f)) + (LinearExpr.Decision d.Decision)
+            static member ( + ) (f: float<'Measure>, d: Decision<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = (float f) + d.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (d: Decision<'Measure>, f: float<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = (LinearExpr.Decision d.Value) + (LinearExpr.Constant (float f))
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (lDecision: Decision<'Measure> , rDecision: Decision<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = lDecision.Value + rDecision.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( * ) (f: float<'LMeasure>, d: Decision<'RMeasure>) =
+                let newExpr = (float f) * d.Value
+                LinearExpr<'LMeasure 'RMeasure> newExpr
+
+            static member ( * ) (d: Decision<'RMeasure>, f: float<'LMeasure>) =
+                let newExpr = d.Value * (float f)
+                LinearExpr<'LMeasure 'RMeasure> newExpr
+
+            // Comparisons
+            // Less or Equals
+            static member ( <== ) (f: float<'Measure>, d: Decision<'Measure>) =
+                (LinearExpr.Constant (float f)) <== (LinearExpr.Decision d.Value)
+
+            static member ( <== ) (d: Decision<'Measure>, f: float<'Measure>) =
+                (LinearExpr.Decision d.Value) <== (LinearExpr.Constant (float f))
+
+            static member ( <== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+                (LinearExpr.Decision lDecision.Value) <== (LinearExpr.Decision rDecision.Value)
+
+            // Equals
+            static member ( == ) (f: float<'Measure>, d: Decision<'Measure>) =
+                (LinearExpr.Constant (float f)) == (LinearExpr.Decision d.Value)
+
+            static member ( == ) (d: Decision<'Measure>, f: float<'Measure>) =
+                (LinearExpr.Decision d.Value) == (LinearExpr.Constant (float f))
+
+            static member ( == ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+                (LinearExpr.Decision lDecision.Value) == (LinearExpr.Decision rDecision.Value)
+
+            // Greater or Equals
+            static member ( >== ) (f: float<'Measure>, d: Decision<'Measure>) =
+                (LinearExpr.Constant (float f)) >== (LinearExpr.Decision d.Value)
+
+            static member ( >== ) (d: Decision<'Measure>, f: float<'Measure>) =
+                (LinearExpr.Decision d.Value) >== (LinearExpr.Constant (float f))
+
+            static member ( >== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+                (LinearExpr.Decision lDecision.Value) >== (LinearExpr.Decision rDecision.Value)
+                
 
         [<Struct>] 
         type LinearExpr<[<Measure>] 'Measure> =
-            val internal LinearExpr : Modeling.LinearExpr
+            val internal Value : Modeling.LinearExpr
             new (linearExpr: Modeling.LinearExpr) =
-                { LinearExpr = linearExpr }
+                { Value = linearExpr }
 
-        [<Struct>] 
-        type Objective<[<Measure>] 'Measure> =
-            val internal Objective : Modeling.Objective
-            new (objective: Modeling.Objective) =
-                { Objective = objective}
+            static member ( + ) (f: float<'Measure>, expr: LinearExpr<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = (float f) + expr.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (expr: LinearExpr<'Measure>, f: float<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = expr.Value + (float f)
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = d.Value + expr.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = expr.Value + d.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( + ) (lExpr: LinearExpr<'Measure> , rExpr: LinearExpr<'Measure>) : LinearExpr<'Measure> =
+                let newExpr = lExpr.Value + rExpr.Value
+                LinearExpr<'Measure> newExpr
+
+            static member ( * ) (f: float<'LMeasure>, expr: LinearExpr<'RMeasure>) =
+                let newExpr = (float f) * expr.Value
+                LinearExpr<'LMeasure 'RMeasure> newExpr
+
+            static member ( * ) (expr: LinearExpr<'RMeasure>, f: float<'LMeasure>) =
+                let newExpr = (float f) * expr.Value
+                LinearExpr<'LMeasure 'RMeasure> newExpr
+
+            // Comparisons
+            // Less or Equals
+            static member ( <== ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+                (float f) <== expr.Value
+
+            static member ( <== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+                expr.Value <== (float f)
+
+            static member ( <== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+                d.Value <== expr.Value
+
+            static member ( <== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+                expr.Value <== d.Value
+
+            static member ( <== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+                lExpr.Value <== rExpr.Value
+
+            // Equals
+            static member ( == ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+                (float f) == expr.Value
+
+            static member ( == ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+                expr.Value == (float f)
+
+            static member ( == ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+                d.Value == expr.Value
+
+            static member ( == ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+                expr.Value == d.Value
+
+            static member ( == ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+                lExpr.Value == rExpr.Value
+
+            // Greater or Equals
+            static member ( >== ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+                (float f) >== expr.Value
+
+            static member ( >== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+                expr.Value >== (float f)
+
+            static member ( >== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+                d.Value >== expr.Value
+
+            static member ( >== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+                expr.Value >== d.Value
+
+            static member ( >== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+                lExpr.Value >== rExpr.Value
+                
+
+
+        // [<Struct>] 
+        // type Objective<[<Measure>] 'Measure> =
+        //     val internal Objective : Modeling.Objective
+        //     new (objective: Modeling.Objective) =
+        //         { Objective = objective}
 
 
 module Reduced =
@@ -624,11 +760,11 @@ let objExpr = 1.0 * chicken + 1.0 * cow
 
 let m =
     Model.create ("Test", Maximize, objExpr)
-    |> Model.addConstraint ("Chicken Limit", chicken <== 10.0)
-    |> Model.addConstraint ("Cow Limit", cow <== 5.0)
-    |> Model.addConstraint ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0)
-    |> Model.addBound (chicken, Integer (0, 100))
-    |> Model.addBound (cow, Integer (0, 100))
+    |> Model.addConstraint ("Chicken Limit", chicken <== 10.0<Count>)
+    |> Model.addConstraint ("Cow Limit", cow <== 5.0<_>)
+    |> Model.addConstraint ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
+    |> Model.addBound (chicken, Integer (0<_>, 100<_>))
+    |> Model.addBound (cow, Integer (0<_>, 100<_>))
 
 let settings : ORTools.Settings = {
     Duration_ms = 1_000L
