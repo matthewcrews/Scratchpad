@@ -116,48 +116,48 @@ module rec Modeling =
             Relation.LessOrEquals (lExpr, rExpr)
 
         static member ( <== ) (f: float, expr: LinearExpr) : Relation =
-            (LinearExpr.Constant f) <== expr
+            (Constant f) <== expr
 
         static member ( <== ) (expr: LinearExpr, f: float) : Relation =
-            expr <== (LinearExpr.Constant f)
+            expr <== (Constant f)
 
         static member ( <== ) (d: Decision, expr: LinearExpr) : Relation =
-            (LinearExpr.Decision d) <== expr
+            (Decision d) <== expr
 
         static member ( <== ) (expr: LinearExpr, d: Decision) : Relation =
-            expr <== (LinearExpr.Decision d)
+            expr <== (Decision d)
 
         // Equals
         static member ( == ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.Equals (lExpr, rExpr)
 
         static member ( == ) (f: float, expr: LinearExpr) : Relation =
-            (LinearExpr.Constant f) == expr
+            (Constant f) == expr
 
         static member ( == ) (expr: LinearExpr, f: float) : Relation =
-            expr == (LinearExpr.Constant f)
+            expr == (Constant f)
 
         static member ( == ) (d: Decision, expr: LinearExpr) : Relation =
-            (LinearExpr.Decision d) == expr
+            (Decision d) == expr
 
         static member ( == ) (expr: LinearExpr, d: Decision) : Relation =
-            expr == (LinearExpr.Decision d)
+            expr == (Decision d)
 
         // Greater or Equals
         static member ( >== ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.GreaterOrEquals (lExpr, rExpr)
 
         static member ( >== ) (f: float, expr: LinearExpr) : Relation =
-            (LinearExpr.Constant f) >== expr
+            (Constant f) >== expr
 
         static member ( >== ) (expr: LinearExpr, f: float) : Relation =
-            expr >== (LinearExpr.Constant f)
+            expr >== (Constant f)
 
         static member ( >== ) (d: Decision, expr: LinearExpr) : Relation =
-            (LinearExpr.Decision d) >== expr
+            (Decision d) >== expr
 
         static member ( >== ) (expr: LinearExpr, d: Decision) : Relation =
-            expr >== (LinearExpr.Decision d)
+            expr >== (Decision d)
 
 
     [<RequireQualifiedAccess>]
