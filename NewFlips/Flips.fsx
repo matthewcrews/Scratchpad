@@ -771,17 +771,22 @@ let chicken = Decision<Count> "Chicken"
 let cow = Decision<Count> "Cow"
 let objExpr = 1.0 * chicken + 1.0 * cow
 
+let constraints =
+    [
+        ("Chicken Limit", chicken <== 10.0<Count>)
+        ("Cow Limit", cow <== 5.0<_>)
+        ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
+    ]
+
 let m =
     Model.create "Test" Maximize objExpr
-    |> Model.addConstraint ("Chicken Limit", chicken <== 10.0<Count>)
-    |> Model.addConstraint ("Cow Limit", cow <== 5.0<_>)
-    |> Model.addConstraint ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
+    |> Model.addConstraints constraints
     |> Model.addBound (chicken, Integer (0<_>, 100<_>))
     |> Model.addBound (cow, Integer (0<_>, 100<_>))
 
 let settings : ORTools.Settings = {
     Duration_ms = 1_000L
-    Backend = ORTools.Backend.CBC
+    Backend = ORTools.Backend.GLOPS
     WriteLPFile = None
     EnableOutput = true
 }
