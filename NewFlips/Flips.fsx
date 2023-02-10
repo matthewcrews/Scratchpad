@@ -1,51 +1,48 @@
 module rec Modeling =
 
-    open UnitsOfMeasure
-
-
     type [<Struct>] Decision =
         | Decision of string
-        static member ( + ) (f: float, d: Decision) =
+        static member ( + ) (f: float, d: Decision) : LinearExpr =
             f + (LinearExpr.Decision d)
 
-        static member ( + ) (d: Decision, f: float) =
+        static member ( + ) (d: Decision, f: float) : LinearExpr =
             d + (LinearExpr.Constant f)
 
-        static member ( + ) (lDecision: Decision, rDecision: Decision) =
+        static member ( + ) (lDecision: Decision, rDecision: Decision) : LinearExpr =
             lDecision + (LinearExpr.Decision rDecision)
 
-        static member ( * ) (f: float, d: Decision) =
+        static member ( * ) (f: float, d: Decision) : LinearExpr =
             f * (LinearExpr.Decision d)
 
-        static member ( * ) (d: Decision, f: float) =
+        static member ( * ) (d: Decision, f: float) : LinearExpr =
             f * d
 
         // Comparisons
-        static member ( <== ) (f: float, d: Decision) =
+        static member ( <== ) (f: float, d: Decision) : Relation =
             f <== (LinearExpr.Decision d)
 
-        static member ( <== ) (d: Decision, f: float) =
+        static member ( <== ) (d: Decision, f: float) : Relation =
             d <== (LinearExpr.Constant f)
 
-        static member ( <== ) (lDecision: Decision, rDecision: Decision) =
+        static member ( <== ) (lDecision: Decision, rDecision: Decision) : Relation =
             lDecision <== (LinearExpr.Decision rDecision)
 
-        static member ( == ) (f: float, d: Decision) =
+        static member ( == ) (f: float, d: Decision) : Relation =
             f == (LinearExpr.Decision d)
 
-        static member ( == ) (d: Decision, f: float) =
+        static member ( == ) (d: Decision, f: float) : Relation =
             d == (LinearExpr.Constant f)
 
-        static member ( == ) (lDecision: Decision, rDecision: Decision) =
+        static member ( == ) (lDecision: Decision, rDecision: Decision) : Relation =
             lDecision == (LinearExpr.Decision rDecision)
 
-        static member ( >== ) (f: float, d: Decision) =
+        static member ( >== ) (f: float, d: Decision) : Relation =
             f >== (LinearExpr.Decision d)
 
-        static member ( >== ) (d: Decision, f: float) =
+        static member ( >== ) (d: Decision, f: float) : Relation =
             d >== (LinearExpr.Constant f)
 
-        static member ( >== ) (lDecision: Decision, rDecision: Decision) =
+        static member ( >== ) (lDecision: Decision, rDecision: Decision) : Relation =
             lDecision >== (LinearExpr.Decision rDecision)
 
 
@@ -67,26 +64,26 @@ module rec Modeling =
 
         static member Zero = Constant 0.0
 
-        static member ( + ) (c: float, expr: LinearExpr) =
+        static member ( + ) (c: float, expr: LinearExpr) : LinearExpr =
             match expr with
             | Constant exprConstant -> Constant (c + exprConstant)
             | _ ->
                 Add (Constant c, expr)
 
-        static member ( + ) (expr: LinearExpr, c: float) =
+        static member ( + ) (expr: LinearExpr, c: float) : LinearExpr =
             c + expr
 
-        static member ( + ) (d: Decision, expr: LinearExpr) =
+        static member ( + ) (d: Decision, expr: LinearExpr) : LinearExpr =
             match expr with
             | Constant x when x = 0.0 ->
                 Decision d
             | _ ->
                 Add (Decision d, expr)
 
-        static member ( + ) (expr: LinearExpr, d: Decision) =
+        static member ( + ) (expr: LinearExpr, d: Decision) : LinearExpr =
             d + expr
 
-        static member ( + ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+        static member ( + ) (lExpr: LinearExpr, rExpr: LinearExpr) : LinearExpr =
             match lExpr, rExpr with
             | Constant lConstant, _ when lConstant = 0.0 ->
                 rExpr
@@ -95,7 +92,7 @@ module rec Modeling =
             | _, _ ->
                 Add (lExpr, rExpr)
 
-        static member ( - ) (lExpr: LinearExpr, rExpr: LinearExpr) =
+        static member ( - ) (lExpr: LinearExpr, rExpr: LinearExpr) : LinearExpr =
             match lExpr, rExpr with
             | Constant lConstant, _ when lConstant = 0.0 ->
                 rExpr
@@ -104,13 +101,13 @@ module rec Modeling =
             | _, _ ->
                 Add (lExpr, Product (-1.0, rExpr))
 
-        static member ( * ) (f: float, expr: LinearExpr) =
+        static member ( * ) (f: float, expr: LinearExpr) : LinearExpr =
             if f = 0.0 then
                 Constant 0.0
             else
                 Product (f, expr)
 
-        static member ( * ) (expr: LinearExpr, f: float) =
+        static member ( * ) (expr: LinearExpr, f: float) : LinearExpr =
             f * expr
 
         // Comparisons
@@ -118,48 +115,48 @@ module rec Modeling =
         static member ( <== ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.LessOrEquals (lExpr, rExpr)
 
-        static member ( <== ) (f: float, expr: LinearExpr) =
+        static member ( <== ) (f: float, expr: LinearExpr) : Relation =
             (LinearExpr.Constant f) <== expr
 
-        static member ( <== ) (expr: LinearExpr, f: float) =
+        static member ( <== ) (expr: LinearExpr, f: float) : Relation =
             expr <== (LinearExpr.Constant f)
 
-        static member ( <== ) (d: Decision, expr: LinearExpr) =
+        static member ( <== ) (d: Decision, expr: LinearExpr) : Relation =
             (LinearExpr.Decision d) <== expr
 
-        static member ( <== ) (expr: LinearExpr, d: Decision) =
+        static member ( <== ) (expr: LinearExpr, d: Decision) : Relation =
             expr <== (LinearExpr.Decision d)
 
         // Equals
         static member ( == ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.Equals (lExpr, rExpr)
 
-        static member ( == ) (f: float, expr: LinearExpr) =
+        static member ( == ) (f: float, expr: LinearExpr) : Relation =
             (LinearExpr.Constant f) == expr
 
-        static member ( == ) (expr: LinearExpr, f: float) =
+        static member ( == ) (expr: LinearExpr, f: float) : Relation =
             expr == (LinearExpr.Constant f)
 
-        static member ( == ) (d: Decision, expr: LinearExpr) =
+        static member ( == ) (d: Decision, expr: LinearExpr) : Relation =
             (LinearExpr.Decision d) == expr
 
-        static member ( == ) (expr: LinearExpr, d: Decision) =
+        static member ( == ) (expr: LinearExpr, d: Decision) : Relation =
             expr == (LinearExpr.Decision d)
 
         // Greater or Equals
         static member ( >== ) (lExpr: LinearExpr, rExpr: LinearExpr) : Relation =
             Relation.GreaterOrEquals (lExpr, rExpr)
 
-        static member ( >== ) (f: float, expr: LinearExpr) =
+        static member ( >== ) (f: float, expr: LinearExpr) : Relation =
             (LinearExpr.Constant f) >== expr
 
-        static member ( >== ) (expr: LinearExpr, f: float) =
+        static member ( >== ) (expr: LinearExpr, f: float) : Relation =
             expr >== (LinearExpr.Constant f)
 
-        static member ( >== ) (d: Decision, expr: LinearExpr) =
+        static member ( >== ) (d: Decision, expr: LinearExpr) : Relation =
             (LinearExpr.Decision d) >== expr
 
-        static member ( >== ) (expr: LinearExpr, d: Decision) =
+        static member ( >== ) (expr: LinearExpr, d: Decision) : Relation =
             expr >== (LinearExpr.Decision d)
 
 
@@ -188,24 +185,22 @@ module rec Modeling =
             Constraints: list<struct (Constraint * Relation)>
             DecisionBounds: list<struct (Decision * Bounds)>
         }
-        static member create (name, sense, expression, constraints, bounds) =
-            {
-                Name = name
-                Objective = { Sense = sense; Expr = expression }
-                Constraints = constraints
-                DecisionBounds = bounds
-            }
-
-        static member create (name, sense, expression) =
-            Model.create (ModelName name, sense, expression, [], [])
 
     module Model =
 
-        let addConstraint (c, relation) model =
+        let create (name, sense, expr) : Model =
+            {
+                Name = ModelName name
+                Objective = { Sense = sense; Expr = expr }
+                Constraints = []
+                DecisionBounds = []
+            }
+
+        let addConstraint (c, relation) model : Model =
             { model with
                 Constraints = struct (Constraint c, relation) :: model.Constraints }
 
-        let addConstraints constraints model =
+        let addConstraints constraints model : Model =
 
             let rec loop acc constraints =
                 match constraints with
@@ -219,11 +214,11 @@ module rec Modeling =
             { model with
                 Constraints = newConstraints }
 
-        let addBound (decision, bounds) model =
+        let addBound (decision, bounds) model : Model =
             { model with
                 DecisionBounds = struct (decision, bounds) :: model.DecisionBounds }
 
-        let addBounds decisionBounds model =
+        let addBounds decisionBounds model : Model =
 
             let rec loop acc decisionBounds =
                 match decisionBounds with
@@ -245,8 +240,6 @@ module rec Modeling =
             | Integer of lower: int<'Measure> * upper: int<'Measure>
             | Continuous of lower: float<'Measure> * upper: float<'Measure>
             | Unbounded
-
-
 
         [<Struct>]
         type Decision<[<Measure>] 'Measure> =
@@ -276,33 +269,33 @@ module rec Modeling =
 
             // Comparisons
             // Less or Equals
-            static member ( <== ) (f: float<'Measure>, d: Decision<'Measure>) =
+            static member ( <== ) (f: float<'Measure>, d: Decision<'Measure>) : Relation =
                 (LinearExpr.Constant (float f)) <== (LinearExpr.Decision d.Value)
 
-            static member ( <== ) (d: Decision<'Measure>, f: float<'Measure>) =
+            static member ( <== ) (d: Decision<'Measure>, f: float<'Measure>) : Relation =
                 (LinearExpr.Decision d.Value) <== (LinearExpr.Constant (float f))
 
-            static member ( <== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+            static member ( <== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) : Relation =
                 (LinearExpr.Decision lDecision.Value) <== (LinearExpr.Decision rDecision.Value)
 
             // Equals
-            static member ( == ) (f: float<'Measure>, d: Decision<'Measure>) =
+            static member ( == ) (f: float<'Measure>, d: Decision<'Measure>) : Relation =
                 (LinearExpr.Constant (float f)) == (LinearExpr.Decision d.Value)
 
-            static member ( == ) (d: Decision<'Measure>, f: float<'Measure>) =
+            static member ( == ) (d: Decision<'Measure>, f: float<'Measure>) : Relation =
                 (LinearExpr.Decision d.Value) == (LinearExpr.Constant (float f))
 
-            static member ( == ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+            static member ( == ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) : Relation =
                 (LinearExpr.Decision lDecision.Value) == (LinearExpr.Decision rDecision.Value)
 
             // Greater or Equals
-            static member ( >== ) (f: float<'Measure>, d: Decision<'Measure>) =
+            static member ( >== ) (f: float<'Measure>, d: Decision<'Measure>) : Relation =
                 (LinearExpr.Constant (float f)) >== (LinearExpr.Decision d.Value)
 
-            static member ( >== ) (d: Decision<'Measure>, f: float<'Measure>) =
+            static member ( >== ) (d: Decision<'Measure>, f: float<'Measure>) : Relation =
                 (LinearExpr.Decision d.Value) >== (LinearExpr.Constant (float f))
 
-            static member ( >== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) =
+            static member ( >== ) (lDecision: Decision<'Measure>, rDecision: Decision<'Measure>) : Relation =
                 (LinearExpr.Decision lDecision.Value) >== (LinearExpr.Decision rDecision.Value)
                 
 
@@ -332,64 +325,84 @@ module rec Modeling =
                 let newExpr = lExpr.Value + rExpr.Value
                 LinearExpr<'Measure> newExpr
 
-            static member ( * ) (f: float<'LMeasure>, expr: LinearExpr<'RMeasure>) =
-                let newExpr = (float f) * expr.Value
+            static member ( * ) (f: float<'M1>, expr: LinearExpr<'M2>) =
+                let newExpr = LinearExpr.Product ((float f), expr.Value)
                 LinearExpr<'LMeasure 'RMeasure> newExpr
 
-            static member ( * ) (expr: LinearExpr<'RMeasure>, f: float<'LMeasure>) =
-                let newExpr = (float f) * expr.Value
+            static member ( * ) (expr: LinearExpr<'LMeasure>, f: float<'RMeasure>) =
+                let newExpr = LinearExpr.Product ((float f), expr.Value)
                 LinearExpr<'LMeasure 'RMeasure> newExpr
 
             // Comparisons
             // Less or Equals
-            static member ( <== ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+            static member ( <== ) (f: float<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 (float f) <== expr.Value
 
-            static member ( <== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+            static member ( <== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) : Relation =
                 expr.Value <== (float f)
 
-            static member ( <== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+            static member ( <== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 d.Value <== expr.Value
 
-            static member ( <== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+            static member ( <== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) : Relation =
                 expr.Value <== d.Value
 
-            static member ( <== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+            static member ( <== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) : Relation =
                 lExpr.Value <== rExpr.Value
 
             // Equals
-            static member ( == ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+            static member ( == ) (f: float<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 (float f) == expr.Value
 
-            static member ( == ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+            static member ( == ) (expr: LinearExpr<'Measure>, f: float<'Measure>) : Relation =
                 expr.Value == (float f)
 
-            static member ( == ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+            static member ( == ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 d.Value == expr.Value
 
-            static member ( == ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+            static member ( == ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) : Relation =
                 expr.Value == d.Value
 
-            static member ( == ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+            static member ( == ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) : Relation =
                 lExpr.Value == rExpr.Value
 
             // Greater or Equals
-            static member ( >== ) (f: float<'Measure>, expr: LinearExpr<'Measure>)=
+            static member ( >== ) (f: float<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 (float f) >== expr.Value
 
-            static member ( >== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) =
+            static member ( >== ) (expr: LinearExpr<'Measure>, f: float<'Measure>) : Relation =
                 expr.Value >== (float f)
 
-            static member ( >== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) =
+            static member ( >== ) (d: Decision<'Measure>, expr: LinearExpr<'Measure>) : Relation =
                 d.Value >== expr.Value
 
-            static member ( >== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) =
+            static member ( >== ) (expr: LinearExpr<'Measure>, d: Decision<'Measure>) : Relation =
                 expr.Value >== d.Value
 
-            static member ( >== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) =
+            static member ( >== ) (lExpr: LinearExpr<'Measure>, rExpr: LinearExpr<'Measure>) : Relation =
                 lExpr.Value >== rExpr.Value
-                
 
+
+        module Model =
+
+            let create name sense (expr: LinearExpr<_>) : Model=
+                {
+                    Name = ModelName name
+                    Objective = { Sense = sense; Expr = expr.Value}
+                    Constraints = []
+                    DecisionBounds = []
+                }
+
+            let addBound (decision: Decision<'Measure>, bounds: Bounds<'Measure>) model : Model =
+                let newBounds =
+                    match bounds with
+                    | Binary -> Modeling.Bounds.Binary
+                    | Integer (lower, upper) -> Modeling.Bounds.Integer (int lower, int upper)
+                    | Continuous (lower, upper) -> Modeling.Bounds.Continuous (float lower, float upper)
+                    | Unbounded -> Modeling.Bounds.Unbounded
+
+                { model with
+                    DecisionBounds = struct (decision.Value, newBounds) :: model.DecisionBounds }
 
         // [<Struct>] 
         // type Objective<[<Measure>] 'Measure> =
@@ -759,7 +772,7 @@ let cow = Decision<Count> "Cow"
 let objExpr = 1.0 * chicken + 1.0 * cow
 
 let m =
-    Model.create ("Test", Maximize, objExpr)
+    Model.create "Test" Maximize objExpr
     |> Model.addConstraint ("Chicken Limit", chicken <== 10.0<Count>)
     |> Model.addConstraint ("Cow Limit", cow <== 5.0<_>)
     |> Model.addConstraint ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
