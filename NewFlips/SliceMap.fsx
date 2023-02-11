@@ -229,7 +229,7 @@ module RangeSetIndex =
 
 
 [<Struct>]
-type SliceSetEnumerator<'T> =
+type RangeSetEnumerator<'T> =
     private
         {
             mutable CurRangeIndex: int
@@ -270,6 +270,28 @@ type SliceSetEnumerator<'T> =
             e.CurValue
 
 
+
+let rec loop (left: IEnumerator<KeyValuePair<'a, _>>, right: IEnumerator<KeyValuePair<'a, _>>) =
+    let fastComparer = LanguagePrimitives.FastGenericComparer
+    let leftKey = left.Current.Key
+    let rightKey = right.Current.Key
+    
+    let compareResult = fastComparer.Compare (leftKey, rightKey)
+
+    if compareResult = 0 then
+        true
+    elif compareResult < 0 then
+        if left.MoveNext() then
+            loop (left, right)
+        else
+            false
+    else
+        if right.MoveNext() then
+            loop (left, right)
+        else
+            false
+
+
 [<Struct>]
 type SliceMap<'a, 'v
     when 'a: equality
@@ -281,6 +303,14 @@ type SliceMap<'a, 'v
             let key = keys[index]
             KeyValuePair (key, values[index])
 
+    static member inline ( .* ) (left: SliceMap<'a, 'LValue>, right: SliceMap<'a, 'RValue>) =
+        let lValues = left.Values
+        let rValues = right.Values
+        
+        let getValue (lIndex: int<Index>, rIndex: int<Index>) =
+            lValues[lIndex] * rValues[rIndex]
+
+        ()
 
     new (pairs: seq<'a * 'v>) =
         let pairs =
@@ -292,6 +322,8 @@ type SliceMap<'a, 'v
         let keys = pairs |> Array.map fst |> RangeSetIndex.create
         let values = pairs |> Array.map snd |> bar
         SliceMap (RangeFilter.All, keys, values)
+
+    member internal _.Values : bar<Index, 'v> = values
 
     member _.GetEnumerator () =
         let keys = aIndex.Keys
@@ -329,12 +361,16 @@ type SliceMap<'a, 'v
     interface IEnumerable<KeyValuePair<'a, 'v>> with
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
+type SliceMapExpr<'k, 'v when 'k : comparison> =
+    | Empty
+    | Product of SliceMap<'k, 'v> * SliceMapExpr<'k, 'v>
 
-let x = SliceMap [
-    "a", 1
-    "b", 2
-    "c", 3
-]
 
-for KeyValue (k, v) in x do
-    printfn $"[{k}]->{v}"
+// let x = SliceMap [
+//     "a", 1
+//     "b", 2
+//     "c", 3
+// ]
+
+// for KeyValue (k, v) in x do
+//     printfn $"[{k}]->{v}"
