@@ -367,12 +367,10 @@ type SliceSet2D<'a, 'b
         let mutable e = s.GetEnumerator()
         Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
 
-
     member _.Item
         with get (aKey: 'a, _: All) =
             let newRangeFilter = rangeFilter.Intersect aIndex[aKey]
             SliceSet (newRangeFilter, bIndex)
-
 
     member _.Item
         with get (_: All, bKey: 'b) =

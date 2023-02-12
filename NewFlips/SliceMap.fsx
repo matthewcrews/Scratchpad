@@ -305,7 +305,7 @@ type SliceMap<'a, 'v
         fun index ->
             let key = keys[index]
             KeyValuePair (key, values[index])
-            
+
     new (pairs: seq<'a * 'v>) =
         let pairs =
             pairs
@@ -438,11 +438,12 @@ type SliceMap2D<'a, 'b, 'v
 
 
 
-// let x = SliceMap [
-//     "a", 1
-//     "b", 2
-//     "c", 3
-// ]
+let x = SliceMap2D [
+    "a", 1, 1
+    "a", 2, 2
+    "b", 1, 3
+    "b", 2, 4
+]
 
-// for KeyValue (k, v) in x do
-//     printfn $"[{k}]->{v}"
+for KeyValue (k, v) in x["b", All] do
+    printfn $"[{k}]->{v}"
