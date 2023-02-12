@@ -32,6 +32,10 @@ let comparer1Dto1D (a: 'Key, b: 'Key) =
     let comparer = LanguagePrimitives.FastGenericComparer
     comparer.Compare (a, b)
 
+let comparer2Dto1D (struct (a1: 'Key1, a2: 'Key2), b: 'Key2) =
+    let comparer = LanguagePrimitives.FastGenericComparer
+    comparer.Compare (a2, b)
+
 let inline productJoin2
     (comparer: 'Key1 * 'Key2 -> int)
     (a: seq<KeyValuePair<'Key1, 'LValue>>)
@@ -67,10 +71,10 @@ let inline productJoin2
 
 let a =
     [
-        KeyValuePair ("a", 1)
-        KeyValuePair ("c", 1)
-        KeyValuePair ("d", 1)
-        KeyValuePair ("g", 1)
+        KeyValuePair (struct ("a", "b"), 1)
+        KeyValuePair (struct ("b", "b"), 2)
+        KeyValuePair (struct ("c", "b"), 3)
+        KeyValuePair (struct ("d", "b"), 4)
     ]
 
 let b =
@@ -81,5 +85,6 @@ let b =
         KeyValuePair ("g", 2)
     ]
 
-let c = productJoin2 comparer1Dto1D a b
-c
+let c = productJoin2 comparer2Dto1D a b
+for x in c do
+    printfn $"{x}"

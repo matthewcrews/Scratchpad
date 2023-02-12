@@ -32,6 +32,9 @@ type bar<[<Measure>] 'Measure, 'T> = Bar<'Measure, 'T>
 [<Struct>]
 type All = All
 
+[<Struct>]
+type Group = Group
+
 [<Measure>]
 type private Index
 
@@ -302,16 +305,7 @@ type SliceMap<'a, 'v
         fun index ->
             let key = keys[index]
             KeyValuePair (key, values[index])
-
-    static member inline ( .* ) (left: SliceMap<'a, 'LValue>, right: SliceMap<'a, 'RValue>) =
-        let lValues = left.Values
-        let rValues = right.Values
-        
-        let getValue (lIndex: int<Index>, rIndex: int<Index>) =
-            lValues[lIndex] * rValues[rIndex]
-
-        ()
-
+            
     new (pairs: seq<'a * 'v>) =
         let pairs =
             pairs
@@ -319,9 +313,9 @@ type SliceMap<'a, 'v
             |> Array.distinctBy fst
             |> Array.sortBy fst
 
-        let keys = pairs |> Array.map fst |> RangeSetIndex.create
+        let aIndex = pairs |> Array.map fst |> RangeSetIndex.create
         let values = pairs |> Array.map snd |> bar
-        SliceMap (RangeFilter.All, keys, values)
+        SliceMap (RangeFilter.All, aIndex, values)
 
     member internal _.Values : bar<Index, 'v> = values
 
@@ -361,9 +355,87 @@ type SliceMap<'a, 'v
     interface IEnumerable<KeyValuePair<'a, 'v>> with
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
-type SliceMapExpr<'k, 'v when 'k : comparison> =
-    | Empty
-    | Product of SliceMap<'k, 'v> * SliceMapExpr<'k, 'v>
+
+[<Struct>]
+type SliceMap2D<'a, 'b, 'v
+    when 'a: equality
+    and 'a: comparison
+    and 'b: equality
+    and 'b: comparison>
+    (rangeFilter: RangeFilter, aIndex: RangeSetIndex<'a>, bIndex: RangeSetIndex<'b>, values: bar<Index, 'v>) =
+
+    static let createLookup
+        (aKeys: bar<Index, 'a>)
+        (bKeys: bar<Index, 'b>)
+        (values: bar<Index, 'v>) =
+        fun index ->
+            let aKey = aKeys[index]
+            let bKey = bKeys[index]
+            let compositeKey = struct (aKey, bKey)
+            KeyValuePair (compositeKey, values[index])
+
+    new (pairs: seq<'a * 'b * 'v>) =
+        let pairs =
+            pairs
+            |> Array.ofSeq
+            |> Array.distinctBy (fun (a, b, _) -> a, b)
+            |> Array.sortBy (fun (a, b, _) -> a, b)
+
+        let aIndex = pairs |> Array.map (fun (a, _, _) -> a) |> RangeSetIndex.create
+        let bIndex = pairs |> Array.map (fun (_, b, _) -> b) |> RangeSetIndex.create
+        let values = pairs |> Array.map (fun (_, _, v) -> v) |> bar
+        SliceMap2D (RangeFilter.All, aIndex, bIndex, values)
+
+    member internal _.Values : bar<Index, 'v> = values
+
+    member _.GetEnumerator () =
+        let aKeys = aIndex.Keys
+        let bKeys = bIndex.Keys
+        let lookup = createLookup aKeys bKeys values
+
+        let ranges =
+            match rangeFilter with
+            | RangeFilter.Empty ->
+                Array.empty
+            | RangeFilter.All ->
+                let start = 0<_>
+                let length = aIndex.Keys.Length
+                let range = { Start = start; Length = length}
+                [|range|]
+            | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
+                ranges
+
+        {
+            CurRangeIndex = 0
+            CurRange = Unchecked.defaultof<_>
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<_>
+            Ranges = ranges
+            ValueLookup = lookup
+        }
+
+    member _.Item
+        with get (aKey: 'a, _: All) =
+            let newRangeFilter = rangeFilter.Intersect aIndex[aKey]
+            SliceMap (newRangeFilter, bIndex, values)
+
+    member _.Item
+        with get (_: All, bKey: 'b) =
+            let newRangeFilter = rangeFilter.Intersect bIndex[bKey]
+            SliceMap (newRangeFilter, aIndex, values)
+
+    member s.ToSeq =
+        let mutable e = s.GetEnumerator()
+        Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
+
+    interface Collections.IEnumerable with
+        member s.GetEnumerator() =
+            s.ToSeq.GetEnumerator() :> Collections.IEnumerator
+
+    interface IEnumerable<KeyValuePair<struct ('a * 'b), 'v>> with
+        member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+
+
 
 
 // let x = SliceMap [
