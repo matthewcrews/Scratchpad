@@ -546,6 +546,9 @@ module rec Modeling =
                     acc <- acc + result
                 acc
         
+
+        let sum = SumBuilder()
+
         // [<Struct>] 
         // type Objective<[<Measure>] 'Measure> =
         //     val internal Objective : Modeling.Objective
@@ -909,7 +912,7 @@ module ORTools =
 
 
 open Modeling
-// open Modeling.UnitsOfMeasure
+open Modeling.UnitsOfMeasure
 
 // type [<Measure>] Count
 // type [<Measure>] Size
@@ -956,39 +959,42 @@ open Modeling
 //
 // let r3 = Solver.LinearExpr.ofModeling e
 
-
-open System.Collections.Generic
-
-
-
-
-let sum = SumBuilder()
+[<Measure>]
+type Count
 
 let decs =
     [ for i in 1 .. 4 do
         for j in 1..2 do
             let name = $"Dec{i}{j}"
-            (float (i * 10 + j)) * (Decision name)]
+            (float (i * 10 + j)) * (Decision<Count> name)]
 
 let decMap =
     Map [ for i in 1 .. 4 do
             let name = $"Dec{i}"
-            i, (float i) * (Decision name)]
+            i, (float i) * (Decision<Count> name)]
 
 let fSum =
     sum { for i in 1.0..4.0 do
-            i }
+            i * 1.0<Count> }
 
 let dSeqSum =
     sum { for i in 1..4 do
             let name = $"Dec{i}"
-            Decision name}
+            Decision<Count> name}
+
 
 let exprSeqSum =
     sum { for i in 1..4 do
-            let d = Decision ($"Dec{i}")
+            let d = Decision<Count> ($"Dec{i}")
             (float i) * d }
+
+let x = exprSeqSum + dSeqSum
+
 
 // let fSum = sum { floats }
 let dSum = sum { decs }
 let decMapSum = sum { decMap }
+
+
+dSum.Value
+decMapSum.Value
