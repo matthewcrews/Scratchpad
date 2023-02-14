@@ -548,6 +548,158 @@ type SliceMap3D<'a, 'b, 'c, 'v
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
+[<Struct>]
+type SliceMap4D<'a, 'b, 'c, 'd, 'v
+    when 'a: equality
+    and 'a: comparison
+    and 'b: equality
+    and 'b: comparison
+    and 'c: equality
+    and 'c: comparison
+    and 'd: equality
+    and 'd: comparison>
+    (rangeFilter: RangeFilter, aIndex: RangeSetIndex<'a>, bIndex: RangeSetIndex<'b>, cIndex: RangeSetIndex<'c>, dIndex: RangeSetIndex<'d>, values: bar<Index, 'v>) =
+
+    static let createLookup
+        (aKeys: bar<Index, 'a>)
+        (bKeys: bar<Index, 'b>)
+        (cKeys: bar<Index, 'c>)
+        (dKeys: bar<Index, 'd>)
+        (values: bar<Index, 'v>) =
+        fun index ->
+            let a = aKeys[index]
+            let b = bKeys[index]
+            let c = cKeys[index]
+            let d = dKeys[index]
+            let compositeKey = struct (a, b, c, d)
+            KeyValuePair (compositeKey, values[index])
+
+    new (pairs: seq<'a * 'b * 'c * 'd * 'v>) =
+        let pairs =
+            pairs
+            |> Array.ofSeq
+            |> Array.distinctBy (fun (a, b, c, d, _) -> a, b, c, d)
+            |> Array.sortBy (fun (a, b, c, d, _) -> a, b, c, d)
+
+        let aIndex = pairs |> Array.map (fun (a, _, _, _, _) -> a) |> RangeSetIndex.create
+        let bIndex = pairs |> Array.map (fun (_, b, _, _, _) -> b) |> RangeSetIndex.create
+        let cIndex = pairs |> Array.map (fun (_, _, c, _, _) -> c) |> RangeSetIndex.create
+        let dIndex = pairs |> Array.map (fun (_, _, _, d, _) -> d) |> RangeSetIndex.create
+        let values = pairs |> Array.map (fun (_, _, _, _, v) -> v) |> bar
+        SliceMap4D (RangeFilter.All, aIndex, bIndex, cIndex, dIndex, values)
+
+    member _.GetEnumerator () =
+        let aKeys = aIndex.Keys
+        let bKeys = bIndex.Keys
+        let cKeys = cIndex.Keys
+        let dKeys = dIndex.Keys
+        let lookup = createLookup aKeys bKeys cKeys dKeys values
+
+        let ranges =
+            match rangeFilter with
+            | RangeFilter.Empty ->
+                Array.empty
+            | RangeFilter.All ->
+                let start = 0<_>
+                let length = aIndex.Keys.Length
+                let range = { Start = start; Length = length}
+                [|range|]
+            | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
+                ranges
+
+        {
+            CurRangeIndex = 0
+            CurRange = Unchecked.defaultof<_>
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<_>
+            Ranges = ranges
+            ValueLookup = lookup
+        }
+
+    member _.Item
+        with get (a: 'a, _: All, _: All, _:All) =
+            let newRangeFilter = rangeFilter.Intersect aIndex[a]
+            SliceMap3D (newRangeFilter, bIndex, cIndex, dIndex, values)
+
+    member _.Item
+        with get (_: All, b: 'b, _: All, _: All) =
+            let newRangeFilter = rangeFilter.Intersect bIndex[b]
+            SliceMap3D (newRangeFilter, aIndex, cIndex, dIndex, values)
+
+    member _.Item
+        with get (_: All, _: All, c: 'c, _: All) =
+            let newRangeFilter = rangeFilter.Intersect cIndex[c]
+            SliceMap3D (newRangeFilter, aIndex, bIndex, dIndex, values)
+
+    member _.Item
+        with get (_: All, _: All, _: All, d: 'd) =
+            let newRangeFilter = rangeFilter.Intersect dIndex[d]
+            SliceMap3D (newRangeFilter, aIndex, bIndex, cIndex, values)
+
+    member _.Item
+        with get (a: 'a, b: 'b, _: All, _: All) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[a]
+                |> RangeFilter.intersect bIndex[b]
+
+            SliceMap2D (newRangeFilter, cIndex, dIndex, values)
+
+    member _.Item
+        with get (a: 'a, _: All, c: 'c, _: All) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[a]
+                |> RangeFilter.intersect cIndex[c]
+
+            SliceMap2D (newRangeFilter, bIndex, dIndex, values)
+
+    member _.Item
+        with get (_: All, b: 'b, c: 'c, _: All) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect bIndex[b]
+                |> RangeFilter.intersect cIndex[c]
+
+            SliceMap2D (newRangeFilter, aIndex, dIndex, values)
+
+    member _.Item
+        with get (a: 'a, _: All, _: All, d: 'd) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect aIndex[a]
+                |> RangeFilter.intersect dIndex[d]
+
+            SliceMap2D (newRangeFilter, bIndex, cIndex, values)
+
+    member _.Item
+        with get (_: All, b: 'b, _: All, d: 'd) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect bIndex[b]
+                |> RangeFilter.intersect dIndex[d]
+
+            SliceMap2D (newRangeFilter, aIndex, cIndex, values)
+
+    member _.Item
+        with get (_: All, _: All, c: 'c, d: 'd) =
+            let newRangeFilter =
+                rangeFilter
+                |> RangeFilter.intersect cIndex[c]
+                |> RangeFilter.intersect dIndex[d]
+
+            SliceMap2D (newRangeFilter, aIndex, bIndex, values)
+
+    member s.ToSeq =
+        let mutable e = s.GetEnumerator()
+        Seq.unfold (fun _ -> if e.MoveNext() then Some(e.Current, ()) else None) ()
+
+    interface Collections.IEnumerable with
+        member s.GetEnumerator() =
+            s.ToSeq.GetEnumerator() :> Collections.IEnumerator
+
+    interface IEnumerable<KeyValuePair<struct ('a * 'b * 'c * 'd), 'v>> with
+        member s.GetEnumerator() = s.ToSeq.GetEnumerator()
 
 
 let x = SliceMap2D [
