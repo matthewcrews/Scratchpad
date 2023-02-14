@@ -1,5 +1,7 @@
 module rec Modeling =
 
+    open System.Collections.Generic
+
     type [<Struct>] Decision =
         | Decision of string
         static member ( + ) (f: float, d: Decision) : LinearExpr =
@@ -233,6 +235,75 @@ module rec Modeling =
                 DecisionBounds = newBounds }
 
 
+    type SumBuilder () =
+
+        member _.Zero () = LinearExpr.Zero
+        member _.Delay (expr: unit -> LinearExpr) = expr
+        member _.Run (expr: unit -> LinearExpr) = expr ()
+        member _.Combine (a: LinearExpr, b: unit -> LinearExpr) = a + b ()
+
+        member _.Yield (a: float) = a
+        member _.Yield (a: Decision) = a
+        member _.Yield (a: LinearExpr) = a
+
+        member _.Yield (a: seq<float>) =
+            let mutable acc = LinearExpr.Zero
+            for x in a do
+                acc <- acc + x
+            acc
+        
+        member _.Yield (a: seq<Decision>) =
+            let mutable acc = LinearExpr.Zero
+            for x in a do
+                acc <- acc + x
+            acc
+
+        member _.Yield (a: seq<LinearExpr>) =
+            let mutable acc = LinearExpr.Zero
+            for x in a do
+                acc <- acc + x
+            acc
+
+        member _.Yield (a: seq<KeyValuePair<_, float>>) =
+            let mutable acc = LinearExpr.Zero
+            for KeyValue (_, x) in a do
+                acc <- acc + x
+            acc
+
+        member _.Yield (a: seq<KeyValuePair<_, Decision>>) =
+            let mutable acc = LinearExpr.Zero
+            for KeyValue (_, x) in a do
+                acc <- acc + x
+            acc
+
+        member _.Yield (a: seq<KeyValuePair<_, LinearExpr>>) =
+            let mutable acc = LinearExpr.Zero
+            for KeyValue (_, x) in a do
+                acc <- acc + x
+            acc
+
+        member _.For (a: seq<'a>, body: 'a -> float) =
+            let mutable acc = 0.0
+            for x in a do
+                let result = body x
+                acc <- acc + result
+            LinearExpr.Constant acc
+
+        member _.For (a: seq<'a>, body: 'a -> Decision) =
+            let mutable acc = LinearExpr.Zero
+            for x in a do
+                let result = body x
+                acc <- acc + result
+            acc
+
+        member _.For (a: seq<'a>, body: 'a -> LinearExpr) =
+            let mutable acc = LinearExpr.Zero
+            for x in a do
+                let result = body x
+                acc <- acc + result
+            acc
+
+
     module UnitsOfMeasure =
 
         type Bounds<[<Measure>] 'Measure> =
@@ -304,6 +375,8 @@ module rec Modeling =
             val internal Value : Modeling.LinearExpr
             new (linearExpr: Modeling.LinearExpr) =
                 { Value = linearExpr }
+
+            static member Zero : LinearExpr<'Measure> = LinearExpr<'Measure> (LinearExpr.Zero)
 
             static member ( + ) (f: float<'Measure>, expr: LinearExpr<'Measure>) : LinearExpr<'Measure> =
                 let newExpr = (float f) + expr.Value
@@ -404,11 +477,82 @@ module rec Modeling =
                 { model with
                     DecisionBounds = struct (decision.Value, newBounds) :: model.DecisionBounds }
 
+        
+        type SumBuilder () =
+
+            member _.Zero () = LinearExpr.Zero
+            member _.Delay (expr: unit -> LinearExpr<_>) = expr
+            member _.Run (expr: unit -> LinearExpr<_>) = expr ()
+            member _.Combine (a: LinearExpr<_>, b: unit -> LinearExpr<_>) = a + b ()
+
+            member _.Yield (a: float<_>) = a
+            member _.Yield (a: Decision<_>) = a
+            member _.Yield (a: LinearExpr<_>) = a
+
+            member _.Yield (a: seq<float<'Measure>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for x in a do
+                    acc <- acc + x
+                acc
+            
+            member _.Yield (a: seq<Decision<'Measure>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for x in a do
+                    acc <- acc + x
+                acc
+
+            member _.Yield (a: seq<LinearExpr<'Measure>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for x in a do
+                    acc <- acc + x
+                acc
+
+            member _.Yield (a: seq<KeyValuePair<_, float<'Measure>>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for KeyValue (_, x) in a do
+                    acc <- acc + x
+                acc
+
+            member _.Yield (a: seq<KeyValuePair<_, Decision<'Measure>>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for KeyValue (_, x) in a do
+                    acc <- acc + x
+                acc
+
+            member _.Yield (a: seq<KeyValuePair<_, LinearExpr<'Measure>>>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for KeyValue (_, x) in a do
+                    acc <- acc + x
+                acc
+
+            member _.For (a: seq<'a>, body: 'a -> float<'Measure>) =
+                let mutable acc = LanguagePrimitives.FloatWithMeasure<'Measure> 0.0
+                for x in a do
+                    let result = body x
+                    acc <- acc + result
+                LinearExpr<'Measure> (LinearExpr.Constant (float acc))
+
+            member _.For (a: seq<'a>, body: 'a -> Decision<'Measure>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for x in a do
+                    let result = body x
+                    acc <- acc + result
+                acc
+
+            member _.For (a: seq<'a>, body: 'a -> LinearExpr<'Measure>) =
+                let mutable acc = LinearExpr<'Measure>.Zero
+                for x in a do
+                    let result = body x
+                    acc <- acc + result
+                acc
+        
         // [<Struct>] 
         // type Objective<[<Measure>] 'Measure> =
         //     val internal Objective : Modeling.Objective
         //     new (objective: Modeling.Objective) =
         //         { Objective = objective}
+
+
 
 
 module Reduced =
@@ -588,6 +732,8 @@ module Reduced =
             }
 
 
+
+
 #r "nuget: Google.OrTools, 9.5.2237"
 
 module ORTools =
@@ -763,36 +909,36 @@ module ORTools =
 
 
 open Modeling
-open Modeling.UnitsOfMeasure
+// open Modeling.UnitsOfMeasure
 
-type [<Measure>] Count
-type [<Measure>] Size
+// type [<Measure>] Count
+// type [<Measure>] Size
 
-let chicken = Decision<Count> "Chicken"
-let cow = Decision<Count> "Cow"
-let objExpr = 1.0 * chicken + 1.0 * cow
+// let chicken = Decision<Count> "Chicken"
+// let cow = Decision<Count> "Cow"
+// let objExpr = 1.0 * chicken + 1.0 * cow
 
-let constraints =
-    [
-        ("Chicken Limit", chicken <== 10.0<Count>)
-        ("Cow Limit", cow <== 5.0<_>)
-        ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
-    ]
+// let constraints =
+//     [
+//         ("Chicken Limit", chicken <== 10.0<Count>)
+//         ("Cow Limit", cow <== 5.0<_>)
+//         ("AnimalLimit", 2.0*chicken + 3.0*cow <== 30.0<_>)
+//     ]
 
-let m =
-    Model.create "Test" Maximize objExpr
-    |> Model.addConstraints constraints
-    |> Model.addBound (chicken, Integer (0<_>, 100<_>))
-    |> Model.addBound (cow, Integer (0<_>, 100<_>))
+// let m =
+//     Model.create "Test" Maximize objExpr
+//     |> Model.addConstraints constraints
+//     |> Model.addBound (chicken, Integer (0<_>, 100<_>))
+//     |> Model.addBound (cow, Integer (0<_>, 100<_>))
 
-let settings : ORTools.Settings = {
-    Duration_ms = 1_000L
-    Backend = ORTools.Backend.GLOPS
-    WriteLPFile = None
-    EnableOutput = true
-}
+// let settings : ORTools.Settings = {
+//     Duration_ms = 1_000L
+//     Backend = ORTools.Backend.GLOPS
+//     WriteLPFile = None
+//     EnableOutput = true
+// }
 
-let s = ORTools.solve settings m
+// let s = ORTools.solve settings m
 
 
 //
@@ -809,3 +955,40 @@ let s = ORTools.solve settings m
 // let e3 = 1.0 * d1 + 2.0 * d2
 //
 // let r3 = Solver.LinearExpr.ofModeling e
+
+
+open System.Collections.Generic
+
+
+
+
+let sum = SumBuilder()
+
+let decs =
+    [ for i in 1 .. 4 do
+        for j in 1..2 do
+            let name = $"Dec{i}{j}"
+            (float (i * 10 + j)) * (Decision name)]
+
+let decMap =
+    Map [ for i in 1 .. 4 do
+            let name = $"Dec{i}"
+            i, (float i) * (Decision name)]
+
+let fSum =
+    sum { for i in 1.0..4.0 do
+            i }
+
+let dSeqSum =
+    sum { for i in 1..4 do
+            let name = $"Dec{i}"
+            Decision name}
+
+let exprSeqSum =
+    sum { for i in 1..4 do
+            let d = Decision ($"Dec{i}")
+            (float i) * d }
+
+// let fSum = sum { floats }
+let dSum = sum { decs }
+let decMapSum = sum { decMap }
