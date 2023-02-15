@@ -2,7 +2,8 @@ module rec Modeling =
 
     open System.Collections.Generic
 
-    type [<Struct>] Decision =
+    [<Struct>]
+    type Decision =
         | Decision of string
         static member ( + ) (f: float, d: Decision) : LinearExpr =
             f + (LinearExpr.Decision d)
@@ -172,7 +173,8 @@ module rec Modeling =
         | Minimize
         | Maximize
 
-    type [<Struct>] ModelName = ModelName of string
+    [<Struct>] 
+    type ModelName = ModelName of string
 
     type [<Struct>] Objective =
         {

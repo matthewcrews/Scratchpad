@@ -711,3 +711,18 @@ let x = SliceMap2D [
 
 for KeyValue (k, v) in x["b", All] do
     printfn $"[{k}]->{v}"
+
+
+let x4 = SliceMap4D [
+    1, 1, 1, 1, 1.0
+    1, 3, 2, 4, 2.0
+    1, 4, 2, 1, 3.0
+    2, 1, 2, 1, 4.0
+    2, 4, 2, 4, 5.0
+    2, 1, 2, 1, 6.0
+    2, 3, 1, 4, 7.0
+    2, 1, 1, 1, 8.0
+]
+
+for KeyValue (k, v) in x4[All, 3, All, All] do
+    printfn $"Key: {k} | Value: {v}"

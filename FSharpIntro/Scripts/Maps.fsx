@@ -13,6 +13,8 @@ a = b
 // Adding an element returns a new Map
 let c = a.Add (4, "C")
 
+// They are immutable so C <> A
+
 // Key Collisions over-write
 let d = a.Add (1, "D")
 
