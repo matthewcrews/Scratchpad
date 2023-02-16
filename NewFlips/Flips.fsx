@@ -581,43 +581,37 @@ module Reduced =
             Coefficients: ReadOnlyDictionary<Modeling.Decision, float>
         }
         static member ofModeling
-            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
             (expr: Modeling.LinearExpr)
             =
 
-            let rec loop (multiplier: float, offsets: ResizeArray<float>, coefficients: Dictionary<Modeling.Decision, ResizeArray<float>>) (expr: Modeling.LinearExpr) cont =
+            let offsets = ResizeArray<float>()
+            let coefficients = Dictionary<Modeling.Decision, ResizeArray<float>>()
+            let frames = Stack<struct (float * Modeling.LinearExpr)>()
+            frames.Push struct (1.0, expr)
+
+            while frames.Count > 0 do
+
+                let struct (multiplier, expr) = frames.Pop()
+
                 match expr with
                 | Modeling.LinearExpr.Constant c ->
                     offsets.Add (multiplier * c)
-                    cont (multiplier, offsets, coefficients)
 
                 | Modeling.LinearExpr.Decision d ->
-                    // Check if we already have bounds for this Decision
-                    // If we do not, set it as unbounded
-                    if not (decisionBounds.ContainsKey d) then
-                        decisionBounds[d] <- Modeling.Bounds.Unbounded
-
                     match coefficients.TryGetValue d with
-                    | true, decisionCoefficients ->
-                        decisionCoefficients.Add multiplier
-
+                    | true, newCoefsForDecision ->
+                        newCoefsForDecision.Add multiplier
                     | false, _ ->
-                        let newDecisionCoefficients = ResizeArray()
-                        newDecisionCoefficients.Add multiplier
-                        coefficients[d] <- newDecisionCoefficients
+                        let newCoefsForDecision = ResizeArray()
+                        newCoefsForDecision.Add multiplier
+                        coefficients[d] <- newCoefsForDecision
 
-                    cont (multiplier, offsets, coefficients)
-
-                | Modeling.LinearExpr.Product (coefficient, expr) ->
-                    loop ((coefficient * multiplier), offsets, coefficients) expr cont
+                | Modeling.LinearExpr.Product (newMultiplier, newExpr) ->
+                    frames.Push struct (multiplier * newMultiplier, newExpr)
 
                 | Modeling.LinearExpr.Add (lExpr, rExpr) ->
-                    loop (multiplier, offsets, coefficients) lExpr (fun (_, offsets, coefficients) -> loop (multiplier, offsets, coefficients) rExpr cont)
-
-
-            let offsets = ResizeArray()
-            let coefficients = Dictionary()
-            let _ = loop (1.0, offsets, coefficients) expr id
+                    frames.Push struct (multiplier, lExpr)
+                    frames.Push struct (multiplier, rExpr)
 
             let offset =
                 // Sort to reduce error from float addition
@@ -636,6 +630,54 @@ module Reduced =
                 Coefficients = ReadOnlyDictionary resultCoefficients
             }
 
+
+            // let rec loop (multiplier: float, offsets: ResizeArray<float>, coefficients: Dictionary<Modeling.Decision, ResizeArray<float>>) (expr: Modeling.LinearExpr) cont =
+            //     match expr with
+            //     | Modeling.LinearExpr.Constant c ->
+            //         offsets.Add (multiplier * c)
+            //         cont (multiplier, offsets, coefficients)
+
+            //     | Modeling.LinearExpr.Decision d ->
+
+            //         match coefficients.TryGetValue d with
+            //         | true, decisionCoefficients ->
+            //             decisionCoefficients.Add multiplier
+
+            //         | false, _ ->
+            //             let newDecisionCoefficients = ResizeArray()
+            //             newDecisionCoefficients.Add multiplier
+            //             coefficients[d] <- newDecisionCoefficients
+
+            //         cont (multiplier, offsets, coefficients)
+
+            //     | Modeling.LinearExpr.Product (coefficient, expr) ->
+            //         loop ((coefficient * multiplier), offsets, coefficients) expr cont
+
+            //     | Modeling.LinearExpr.Add (lExpr, rExpr) ->
+            //         loop (multiplier, offsets, coefficients) lExpr (fun (_, offsets, coefficients) -> loop (multiplier, offsets, coefficients) rExpr cont)
+
+
+            // let offsets = ResizeArray()
+            // let coefficients = Dictionary()
+            // let _ = loop (1.0, offsets, coefficients) expr id
+
+            // let offset =
+            //     // Sort to reduce error from float addition
+            //     offsets.Sort SignInsensitiveComparer.Instance
+            //     Seq.sum offsets
+
+            // let resultCoefficients = Dictionary()
+            // for KeyValue (decision, decisionCoefficients) in coefficients do
+            //     // Sort to reduce error from float addition
+            //     decisionCoefficients.Sort SignInsensitiveComparer.Instance
+            //     let coefficient = Seq.sum decisionCoefficients
+            //     resultCoefficients[decision] <- coefficient
+
+            // {
+            //     Offset = offset
+            //     Coefficients = ReadOnlyDictionary resultCoefficients
+            // }
+
     type Constraint =
         {
             Name: Modeling.Constraint
@@ -647,26 +689,25 @@ module Reduced =
     module Constraint =
 
         let ofModeling
-            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
             (struct (name, relation: Modeling.Relation))
             =
 
             let coefficients, lowerBound, upperBound =
                 match relation with
                 | Modeling.Relation.Equals (lExpr, rExpr) ->
-                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let newExpr = LinearExpr.ofModeling (lExpr - rExpr)
                     let lowerBound = -1.0 * newExpr.Offset
                     let upperBound = -1.0 * newExpr.Offset
                     newExpr.Coefficients, lowerBound, upperBound
 
                 | Modeling.Relation.LessOrEquals (lExpr, rExpr) ->
-                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let newExpr = LinearExpr.ofModeling (lExpr - rExpr)
                     let lowerBound = System.Double.NegativeInfinity
                     let upperBound = -1.0 * newExpr.Offset
                     newExpr.Coefficients, lowerBound, upperBound
 
                 | Modeling.Relation.GreaterOrEquals (lExpr, rExpr) ->
-                    let newExpr = LinearExpr.ofModeling decisionBounds (lExpr - rExpr)
+                    let newExpr = LinearExpr.ofModeling (lExpr - rExpr)
                     let lowerBound = -1.0 * newExpr.Offset
                     let upperBound = System.Double.PositiveInfinity
                     newExpr.Coefficients, lowerBound, upperBound
@@ -696,10 +737,9 @@ module Reduced =
     module Objective =
 
         let ofModeling
-            (decisionBounds: Dictionary<Modeling.Decision, Modeling.Bounds>)
             (objective: Modeling.Objective)
             =
-            let newExpr = LinearExpr.ofModeling decisionBounds objective.Expr
+            let newExpr = LinearExpr.ofModeling objective.Expr
             let newSense = Sense.ofModeling objective.Sense
             { Expr = newExpr; Sense = newSense }
 
@@ -721,11 +761,20 @@ module Reduced =
             for struct (decision, bounds) in model.DecisionBounds do
                 decisionBounds[decision] <- bounds
 
-            let newObjective = Objective.ofModeling decisionBounds model.Objective
+            let newObjective = Objective.ofModeling model.Objective
+            // Check that we have bounds for all of the Decision in the Objective Expr
+            for KeyValue (decision, _) in newObjective.Expr.Coefficients do
+                if not (decisionBounds.ContainsKey decision) then
+                    decisionBounds[decision] <- Modeling.Bounds.Unbounded
 
             for entry in model.Constraints do
-                let newConstraint = Constraint.ofModeling decisionBounds entry
+                let newConstraint = Constraint.ofModeling entry
                 constraints.Push newConstraint
+                // Check that we have bounds for all of the Decision in the Constraint
+                for KeyValue (decision, _) in newConstraint.Coefficients do
+                    if not (decisionBounds.ContainsKey decision) then
+                        decisionBounds[decision] <- Modeling.Bounds.Unbounded
+
 
             let (Modeling.ModelName modelName) = model.Name
 
@@ -913,8 +962,8 @@ module ORTools =
         }
 
 
-open Modeling
-open Modeling.UnitsOfMeasure
+// open Modeling
+// open Modeling.UnitsOfMeasure
 
 // type [<Measure>] Count
 // type [<Measure>] Size
@@ -946,57 +995,57 @@ open Modeling.UnitsOfMeasure
 // let s = ORTools.solve settings m
 
 
-//
-// open Modeling
-//
-// let d1 = Decision "Chicken"
-// let d2 = Decision "Cow"
-// let e = d1 + d2
-// let e1 = 2.0 * d1 + d2
-// let r1 = Solver.LinearExpr.ofModeling e1
-// let e2 = 2.0 * (d1 + 2.0 * d2 + 1.0) + 3.0 * (d2)
-// let r2 = Solver.LinearExpr.ofModeling e2
-//
-// let e3 = 1.0 * d1 + 2.0 * d2
-//
-// let r3 = Solver.LinearExpr.ofModeling e
 
-[<Measure>]
-type Count
+open Modeling
 
-let decs =
-    [ for i in 1 .. 4 do
-        for j in 1..2 do
-            let name = $"Dec{i}{j}"
-            (float (i * 10 + j)) * (Decision<Count> name)]
+let chicken = Decision "Chicken"
+let cow = Decision "Cow"
+let e = chicken + cow
+let e1 = 2.0 * chicken + cow
+let r1 = Reduced.LinearExpr.ofModeling e1
+let e2 = 2.0 * (chicken + 2.0 * cow + 1.0) + 3.0 * (cow)
+let r2 = Reduced.LinearExpr.ofModeling e2
 
-let decMap =
-    Map [ for i in 1 .. 4 do
-            let name = $"Dec{i}"
-            i, (float i) * (Decision<Count> name)]
+let e3 = 1.0 * chicken + 2.0 * cow
 
-let fSum =
-    sum { for i in 1.0..4.0 do
-            i * 1.0<Count> }
+let r3 = Reduced.LinearExpr.ofModeling e
 
-let dSeqSum =
-    sum { for i in 1..4 do
-            let name = $"Dec{i}"
-            Decision<Count> name}
+// [<Measure>]
+// type Count
 
+// let decs =
+//     [ for i in 1 .. 4 do
+//         for j in 1..2 do
+//             let name = $"Dec{i}{j}"
+//             (float (i * 10 + j)) * (Decision<Count> name)]
 
-let exprSeqSum =
-    sum { for i in 1..4 do
-            let d = Decision<Count> ($"Dec{i}")
-            (float i) * d }
+// let decMap =
+//     Map [ for i in 1 .. 4 do
+//             let name = $"Dec{i}"
+//             i, (float i) * (Decision<Count> name)]
 
-let x = exprSeqSum + dSeqSum
+// let fSum =
+//     sum { for i in 1.0..4.0 do
+//             i * 1.0<Count> }
+
+// let dSeqSum =
+//     sum { for i in 1..4 do
+//             let name = $"Dec{i}"
+//             Decision<Count> name}
 
 
-// let fSum = sum { floats }
-let dSum = sum { decs }
-let decMapSum = sum { decMap }
+// let exprSeqSum =
+//     sum { for i in 1..4 do
+//             let d = Decision<Count> ($"Dec{i}")
+//             (float i) * d }
+
+// let x = exprSeqSum + dSeqSum
 
 
-dSum.Value
-decMapSum.Value
+// // let fSum = sum { floats }
+// let dSum = sum { decs }
+// let decMapSum = sum { decMap }
+
+
+// dSum.Value
+// decMapSum.Value
