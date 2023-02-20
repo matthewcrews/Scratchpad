@@ -93,4 +93,11 @@ let myPartialActivePatternFunc (v: int) =
     | IsOdd oddValue -> printfn $"Is Odd{oddValue}"
     | _ -> printfn "Unknown"
 
+open System.Collections.Generic
+
+let keyValueFunc (KeyValue (key, value)) =
+    printfn $"Key {key} {value}"
+
+let x3 = KeyValuePair (1, 2)
+keyValueFunc x3
 

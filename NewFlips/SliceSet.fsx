@@ -230,34 +230,38 @@ module RangeSetIndex =
 
 [<Struct>]
 type SliceSetEnumerator<'T> =
-    private
+    val mutable CurRangeIndex: int
+    val mutable CurIndex: int<Index>
+    val mutable CurValue: 'T
+    val Ranges: Range[]
+    val ValueLookup: int<Index> -> 'T
+
+    new (ranges: Range[], valueLookup: int<Index> -> 'T) =
         {
-            mutable CurRangeIndex: int
-            mutable CurRange: Range
-            mutable CurIndex: int<Index>
-            mutable CurValue: 'T
-            Ranges: Range[]
-            ValueLookup: int<Index> -> 'T
+            CurRangeIndex = -1
+            CurIndex = -1<_>
+            CurValue = Unchecked.defaultof<'T>
+            Ranges = ranges
+            ValueLookup = valueLookup
         }
 
     member e.MoveNext() =
-        if e.CurIndex < 0<_> && e.CurRangeIndex < e.Ranges.Length then
-            e.CurRange <- e.Ranges[e.CurRangeIndex]
-            e.CurIndex <- e.CurRange.Start
+        if e.CurRangeIndex < 0 && e.Ranges.Length > 0 then
+            e.CurRangeIndex <- 0
+            e.CurIndex <- e.Ranges[e.CurRangeIndex].Start
             e.CurValue <- e.ValueLookup e.CurIndex
             true
         else
             e.CurIndex <- e.CurIndex + 1<_>
 
-            if e.CurIndex < e.CurRange.Bound then
+            if e.CurIndex < e.Ranges[e.CurRangeIndex].Bound then
                 e.CurValue <- e.ValueLookup e.CurIndex
                 true
             else
                 e.CurRangeIndex <- e.CurRangeIndex + 1
 
                 if e.CurRangeIndex < e.Ranges.Length then
-                    e.CurRange <- e.Ranges[e.CurRangeIndex]
-                    e.CurIndex <- e.CurRange.Start
+                    e.CurIndex <- e.Ranges[e.CurRangeIndex].Start
                     e.CurValue <- e.ValueLookup e.CurIndex
                     true
                 else
@@ -271,10 +275,10 @@ type SliceSetEnumerator<'T> =
 
 
 [<Struct>]
-type SliceSet<'a when 'a: equality>(rangeFilter: RangeFilter, index: RangeSetIndex<'a>) =
+type SliceSet<'a when 'a: equality>(rangeFilter: RangeFilter, aIndex: RangeSetIndex<'a>) =
 
     member _.GetEnumerator() =
-        let values = index.Keys
+        let aKeys = aIndex.Keys
 
         let ranges =
             match rangeFilter with
@@ -282,20 +286,14 @@ type SliceSet<'a when 'a: equality>(rangeFilter: RangeFilter, index: RangeSetInd
                 Array.empty
             | RangeFilter.All ->
                 let start = 0<_>
-                let length = index.Keys.Length
+                let length = aIndex.Keys.Length
                 let range = { Start = start; Length = length}
                 [|range|]
             | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
                 ranges
 
-        {
-            CurRangeIndex = 0
-            CurRange = Unchecked.defaultof<_>
-            CurIndex = -1<_>
-            CurValue = Unchecked.defaultof<_>
-            Ranges = ranges
-            ValueLookup = fun index -> values[index]
-        }
+        let valueLookup = fun index -> aKeys[index]
+        SliceSetEnumerator (ranges, valueLookup)
 
     member s.ToSeq =
         let mutable e = s.GetEnumerator()
@@ -353,14 +351,8 @@ type SliceSet2D<'a, 'b
             | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
                 ranges
 
-        {
-            CurRangeIndex = 0
-            CurRange = Unchecked.defaultof<_>
-            CurIndex = -1<_>
-            CurValue = Unchecked.defaultof<_>
-            Ranges = ranges
-            ValueLookup = fun index -> struct (aKeys[index], bKeys[index])
-        }
+        let valueLookup = fun index -> struct (aKeys[index], bKeys[index])
+        SliceSetEnumerator (ranges, valueLookup)
 
 
     member s.ToSeq =
@@ -448,14 +440,8 @@ type SliceSet3D<'a, 'b, 'c
             | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
                 ranges
 
-        {
-            CurRangeIndex = 0
-            CurRange = Unchecked.defaultof<_>
-            CurIndex = -1<_>
-            CurValue = Unchecked.defaultof<_>
-            Ranges = ranges
-            ValueLookup = fun index -> struct (aKeys[index], bKeys[index], cKeys[index])
-        }
+        let valueLookup = fun index -> struct (aKeys[index], bKeys[index], cKeys[index])
+        SliceSetEnumerator (ranges, valueLookup)
 
 
     member s.ToSeq =
@@ -589,15 +575,8 @@ type SliceSet4D<'a, 'b, 'c, 'd
             | RangeFilter.RangeSet (RangeSet.Ranges ranges) ->
                 ranges
 
-        {
-            CurRangeIndex = 0
-            CurRange = Unchecked.defaultof<_>
-            CurIndex = -1<_>
-            CurValue = Unchecked.defaultof<_>
-            Ranges = ranges
-            ValueLookup = fun index -> struct (aKeys[index], bKeys[index], cKeys[index], dKeys[index])
-        }
-
+        let valueLookup = fun index -> struct (aKeys[index], bKeys[index], cKeys[index], dKeys[index])
+        SliceSetEnumerator (ranges, valueLookup)
 
     member s.ToSeq =
         let mutable e = s.GetEnumerator()
@@ -656,3 +635,23 @@ type SliceSet4D<'a, 'b, 'c, 'd
 
     interface IEnumerable<struct ('a * 'b * 'c * 'd)> with
         member s.GetEnumerator() = s.ToSeq.GetEnumerator()
+
+
+let s4 =
+    SliceSet4D [
+        1, 1, 1, 4
+        1, 2, 3, 2
+        1, 1, 2, 1
+        1, 2, 3, 4
+        1, 1, 1, 2
+        2, 1, 1, 1
+        2, 2, 2, 4
+        2, 1, 3, 1
+        2, 1, 1, 2
+        2, 1, 3, 1
+        2, 2, 2, 2
+        2, 1, 3, 1
+    ]
+
+for x in s4[10, 10, 10, All] do
+    printfn $"{x}"
