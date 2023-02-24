@@ -2,55 +2,72 @@
 
 open FParsec
 
-let ws = spaces // skips any whitespace
+let maxCount = 100
+let ws = skipMany (skipChar ' ')
 
-let str_ws s = pstring s >>. ws
+let intLiteral =
+    numberLiteral (NumberLiteralOptions.DefaultInteger) "integer"
+    |>> fun n -> int n.String
+    .>> ws
 
-// we calculate with double precision floats
-let number = pfloat .>> ws
+let dash = skipChar '-'
+let numberSplit = ws >>. dash .>> ws
+let preamble = skipCharsTillString "[" true maxCount
+let firstNumber = preamble >>. intLiteral
+let secondNumber = numberSplit >>. intLiteral .>> ws .>> skipChar ']'
+let c = firstNumber .>>. secondNumber |>> (fun (lInt, rInt) -> [lInt; rInt])
+let example = "Weight Bracket [10-1000 ]"
+let x = run c example
 
-// we set up an operator precedence parser for parsing the arithmetic expressions
-let opp = new OperatorPrecedenceParser<float,unit,unit>()
-let expr = opp.ExpressionParser
-opp.TermParser <- number <|> between (str_ws "(") (str_ws ")") expr
+// let ws = spaces // skips any whitespace
 
-// operator definitions follow the schema
-// operator type, string, trailing whitespace parser, precedence, associativity, function to apply
+// let str_ws s = pstring s >>. ws
 
-opp.AddOperator(InfixOperator("+", ws, 1, Associativity.Left, (+)))
-opp.AddOperator(InfixOperator("-", ws, 1, Associativity.Left, (-)))
-opp.AddOperator(InfixOperator("*", ws, 2, Associativity.Left, (*)))
-opp.AddOperator(InfixOperator("/", ws, 2, Associativity.Left, (/)))
-opp.AddOperator(InfixOperator("^", ws, 3, Associativity.Right, fun x y -> System.Math.Pow(x, y)))
-opp.AddOperator(PrefixOperator("-", ws, 4, true, fun x -> -x))
+// // we calculate with double precision floats
+// let number = pfloat .>> ws
 
-// we also want to accept the operators "exp" and "log", but we don't want to accept
-// expressions like "logexp" 2, so we require that non-symbolic operators are not
-// followed by letters
+// // we set up an operator precedence parser for parsing the arithmetic expressions
+// let opp = new OperatorPrecedenceParser<float,unit,unit>()
+// let expr = opp.ExpressionParser
+// opp.TermParser <- number <|> between (str_ws "(") (str_ws ")") expr
 
-let ws1 = nextCharSatisfiesNot isLetter >>. ws
-opp.AddOperator(PrefixOperator("log", ws1, 4, true, System.Math.Log))
-opp.AddOperator(PrefixOperator("exp", ws1, 4, true, System.Math.Exp))
+// // operator definitions follow the schema
+// // operator type, string, trailing whitespace parser, precedence, associativity, function to apply
 
-let completeExpression = ws >>. expr .>> eof // we append the eof parser to make
-                                            // sure all input is consumed
+// opp.AddOperator(InfixOperator("+", ws, 1, Associativity.Left, (+)))
+// opp.AddOperator(InfixOperator("-", ws, 1, Associativity.Left, (-)))
+// opp.AddOperator(InfixOperator("*", ws, 2, Associativity.Left, (*)))
+// opp.AddOperator(InfixOperator("/", ws, 2, Associativity.Left, (/)))
+// opp.AddOperator(InfixOperator("^", ws, 3, Associativity.Right, fun x y -> System.Math.Pow(x, y)))
+// opp.AddOperator(PrefixOperator("-", ws, 4, true, fun x -> -x))
 
-// running and testing the parser
-/////////////////////////////////
-let calculate s = run completeExpression s
+// // we also want to accept the operators "exp" and "log", but we don't want to accept
+// // expressions like "logexp" 2, so we require that non-symbolic operators are not
+// // followed by letters
 
-let equals expectedValue r =
-    match r with
-    | Success (v, _, _) when v = expectedValue -> ()
-    | Success (v, _, _)     -> failwith "Math is hard, let's go shopping!"
-    | Failure (msg, err, _) -> printf "%s" msg; failwith msg
+// let ws1 = nextCharSatisfiesNot isLetter >>. ws
+// opp.AddOperator(PrefixOperator("log", ws1, 4, true, System.Math.Log))
+// opp.AddOperator(PrefixOperator("exp", ws1, 4, true, System.Math.Exp))
 
-let test() =
-    calculate "10.5 + 123.25 + 877"  |> equals 1010.75
-    calculate "10/2 + 123.125 + 877" |> equals 1005.125
-    calculate "(123 + log 1 + 877) * 9/3" |> equals 3000.
-    calculate " ( ( exp 0 + (6 / ( 1 +2 ) )- 123456 )/ 2+123 + 877) * 3^2 / 3" |> equals (-182179.5)
-    printfn "No errors"
+// let completeExpression = ws >>. expr .>> eof // we append the eof parser to make
+//                                             // sure all input is consumed
 
-// currently the program only executes some tests
-do test()
+// // running and testing the parser
+// /////////////////////////////////
+// let calculate s = run completeExpression s
+
+// let equals expectedValue r =
+//     match r with
+//     | Success (v, _, _) when v = expectedValue -> ()
+//     | Success (v, _, _)     -> failwith "Math is hard, let's go shopping!"
+//     | Failure (msg, err, _) -> printf "%s" msg; failwith msg
+
+// let test() =
+//     calculate "10.5 + 123.25 + 877"  |> equals 1010.75
+//     calculate "10/2 + 123.125 + 877" |> equals 1005.125
+//     calculate "(123 + log 1 + 877) * 9/3" |> equals 3000.
+//     calculate " ( ( exp 0 + (6 / ( 1 +2 ) )- 123456 )/ 2+123 + 877) * 3^2 / 3" |> equals (-182179.5)
+//     printfn "No errors"
+
+// // currently the program only executes some tests
+// do test()
