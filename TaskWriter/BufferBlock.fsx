@@ -31,3 +31,6 @@ for next in 1..100 do
 
 writer.Complete()
 wrapUp.Wait()
+
+let myGuid = System.Guid()
+myGuid.ToByteArray
