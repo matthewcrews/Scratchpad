@@ -1,4 +1,5 @@
 open System
+open System.Numerics
 
 [<Struct>]
 type Chicken =
@@ -26,6 +27,30 @@ type Flock =
     member f.SickValues = ReadOnlySpan (f.Inventory, f.Sick.Start, f.Sick.Count)
     member f.HappyValues = ReadOnlySpan (f.Inventory, f.Happy.Start, f.Happy.Count)
 
+[<Measure>]
+type FlockId
+
+[<Struct>]
+type Flocks internal (flocks: Flock[], changeTracker: bool[]) =
+
+    member f.Item
+        with get (x: int<FlockId>) =
+            changeTracker[int x] <- true
+            &flocks[int x]
+
+    // Can have the Inventory Summaries returned as a ReadOnlySpan
+
+module Flocks =
+
+    let create count =
+        let flocks = Array.zeroCreate count
+        let changeTracker = Array.zeroCreate count
+        Flocks (flocks, changeTracker)
+
+/// Compute the next power of 2 that is equal or greater than n
+let computeNextBucketLength (n: int) =
+    1 <<< (64 - (BitOperations.LeadingZeroCount (uint (n - 1))))
+
 module Flock =
 
     module private Helpers =
@@ -33,127 +58,100 @@ module Flock =
         let throwNegativeIndexExceptionHelper () =
             raise (IndexOutOfRangeException "Cannot have an index less than 0")
 
+
         let throwTooLargeOutBufferExceptionHelper () =
             invalidArg "outBuffer" "Out Buffer too large"
 
-        let removeRange (index: int) (outBuffer: Span<int>) (inventory: int[]) (range: byref<Range>) =
-            if index < 0 then
-                throwNegativeIndexExceptionHelper()
-            if index + outBuffer.Length > range.Count then
-                throwTooLargeOutBufferExceptionHelper()
-            let sourceSpan = Span (inventory, range.Start, range.Count)
-            let copySpan = sourceSpan.Slice (index, outBuffer.Length)
-            copySpan.CopyTo outBuffer
+        /// WARNING: This function assumes that the proper range check have already occured
+        let move (source: 'a[]) (range: byref<Range>) (index: int) (target: Span<'a>) =
+            let sourceSpan = Span (source, range.Start, range.Count)
+            let copySpan = sourceSpan.Slice (index, target.Length)
+            copySpan.CopyTo target
 
             // Copy values down
-            range.Count <- range.Count - outBuffer.Length
-            let fillInSource = sourceSpan.Slice (index + outBuffer.Length, range.Count - index)
+            range.Count <- range.Count - target.Length
+            let fillInSource = sourceSpan.Slice (index + target.Length, range.Count - index)
             let fillInDest = sourceSpan.Slice (index, range.Count - index)
             fillInSource.CopyTo fillInDest
 
-        let copyTo (source: ReadOnlySpan<int>) (inventory: int[]) (range: byref<Range>) =
-            let dest = Span (inventory, range.Start + range.Count, source.Length)
-            source.CopyTo dest
-            range.Count <- range.Count + source.Length
+        /// WARNING: This function assumes that the proper range check have already occured
+        let pop (source: 'a[]) (range: byref<Range>) (outBuffer: Span<'a>) =
+            move source &range (range.Count - outBuffer.Length) outBuffer
 
-        let redistribute happyBlockCount sickBlockCount (flock: byref<Flock>) =
-            let newHappyStart = 0
-            let newSickStart = happyBlockCount <<< 3
+        /// WARNING: This function assumes that the proper range check have already occured
+        let dequeue (source: 'a[]) (range: byref<Range>) (outBuffer: Span<'a>) =
+            move source &range 0 outBuffer
 
-            // NOTE: With only two buckets this is easy. With more than two we need to
-            // move the buckets in order of the direction they are moving so as to not
-            // overlap values
-            let inventory = flock.Inventory
-            let source = Span (inventory, flock.Sick.Start, flock.Sick.Count)
-            let target = Span (inventory, newSickStart, flock.Sick.Count)
-            source.CopyTo target
+        let resize newHappyLength newSickLength (flock: byref<Flock>) =
+            let newTotalLength = newHappyLength + newSickLength
+            let newInventory = GC.AllocateUninitializedArray newTotalLength
+            let oldInventory = flock.Inventory
 
-            // Update Starts
-            flock.Sick.Start <- newSickStart
+            let sourceHappy = Span (oldInventory, flock.Happy.Start, flock.Happy.Count)
+            let targetHappy = Span (newInventory, 0, newHappyLength)
+            sourceHappy.CopyTo targetHappy
+            flock.Happy.Length <- newHappyLength
 
-            // Update Lengths
-            flock.Happy.Length <- happyBlockCount <<< 3
-            flock.Sick.Length <- sickBlockCount <<< 3
+            let sourceSick = Span (oldInventory, flock.Sick.Start, flock.Sick.Count)
+            let targetSick = Span (newInventory, flock.Happy.Length, newSickLength)
+            sourceSick.CopyTo targetSick
+            flock.Sick.Start <- flock.Happy.Start + flock.Happy.Length
+            flock.Sick.Length <- newSickLength
 
-        let grow happyBlockCount sickBlockCount (flock: byref<Flock>) =
-            // Calculate the number of blocks of 8 we will need for the new array
-            let totalBlockCount =
-                happyBlockCount +
-                sickBlockCount
-
-            // Create new array for the inventory
-            let newInventory = GC.AllocateUninitializedArray (totalBlockCount <<< 3)
-
-            // Calculate the new start locations for the buckets
-            let newSickStart = happyBlockCount <<< 3
-            // If we had more categories, we would build on them here
-
-            // Copy data from the old array to the new array
-            let tgtHappy = Span (newInventory, 0, flock.Happy.Count)
-            flock.HappyValues.CopyTo tgtHappy
-
-            let tgtSick = Span (newInventory, newSickStart, flock.Sick.Count)
-            flock.SickValues.CopyTo tgtSick
-
-            // Update the inventory array
             flock.Inventory <- newInventory
-            // Set the new starting positions for the buckets
-            // The Happy group always start at 0 so we can skip it
-            // flock.Happy.Start <- 0
-            flock.Sick.Start <- newSickStart
-            // Set the new Lengths
-            flock.Happy.Length <- happyBlockCount <<< 3
-            flock.Sick.Length <- sickBlockCount <<< 3
-
-
-        let resize happyCapacity sickCapacity (flock: byref<Flock>) =
-            let happyBlockCount = (7 + happyCapacity) >>> 3
-            let sickBlockCount = (7 + sickCapacity) >>> 3
-            let requiredBlockCount =
-                happyBlockCount +
-                sickBlockCount
-
-            let curBlockCount = flock.Inventory.Length >>> 3
-
-            if requiredBlockCount > curBlockCount then
-                grow happyBlockCount sickBlockCount &flock
-
-            else
-                redistribute happyBlockCount sickBlockCount &flock
-
 
     open Helpers
 
+    module Happy =
+
+        let removeRange (index: int) (outSpan: Span<int>) (flock: byref<Flock>) =
+            move flock.Inventory &flock.Happy index outSpan
+
+        let pop (outSpan: Span<int>) (flock: byref<Flock>) =
+            removeRange (flock.Happy.Count - outSpan.Length) outSpan &flock
+
+        let dequeue (outSpan: Span<int>) (flock: byref<Flock>) =
+            removeRange 0 outSpan &flock
+
+        let add (source: ReadOnlySpan<int>) (flock: byref<Flock>) =
+            let newHappyCount = flock.Happy.Count + source.Length
+
+            // Ensure space available
+            if newHappyCount > flock.Happy.Length then
+                let newHappyLength = computeNextBucketLength (newHappyCount - 1)
+                resize newHappyLength flock.Sick.Length &flock
+
+            // Perform the copy
+            move source flock.Inventory &flock.Happy
 
     module Sick =
 
-        let removeRange (index: int) (target: Span<int>) (flock: byref<Flock>) =
-            removeRange index target flock.Inventory &flock.Sick
+        let removeRange (index: int) (outSpan: Span<int>) (flock: byref<Flock>) =
+            move flock.Inventory &flock.Sick index outSpan
 
-        let pop (target: Span<int>) (flock: byref<Flock>) =
-            removeRange 0 target &flock
+        let pop (outSpan: Span<int>) (flock: byref<Flock>) =
+            removeRange (flock.Sick.Count - outSpan.Length) outSpan &flock
 
-        let dequeue (target: Span<int>) (flock: byref<Flock>) =
-            removeRange 0 target &flock
+        let dequeue (outSpan: Span<int>) (flock: byref<Flock>) =
+            removeRange 0 outSpan &flock
 
         let add (source: ReadOnlySpan<int>) (flock: byref<Flock>) =
             let newSickCount = flock.Sick.Count + source.Length
-            // Check if we already have enough capacity. If so, copy the data
-            if newSickCount <= flock.Sick.Length then
-                copyTo source flock.Inventory &flock.Sick
 
-            else
-                // Ensure space available
-                resize flock.Happy.Count newSickCount &flock
-                // Perform the copy
-                copyTo source flock.Inventory &flock.Sick
+            // Ensure space available
+            if newSickCount > flock.Sick.Length then
+                let newSickLength = computeNextBucketLength (newSickCount - 1)
+                resize flock.Happy.Length newSickLength &flock
+
+            // Perform the copy
+            copyTo source flock.Inventory &flock.Sick
 
 
 let test () =
     let f = {
-        Inventory = [|1..10|]
-        Happy = { Start = 0; Length = 1; Count = 1 }
-        Sick = { Start = 1; Length = 7; Count = 5 }
+        Inventory = Array.empty
+        Happy = { Start = 0; Length = 0; Count = 0 }
+        Sick = { Start = 0; Length = 0; Count = 0 }
     }
     let flocks = [|
         f
@@ -162,14 +160,67 @@ let test () =
     let flock = &flocks[0]
 
     printfn $"Flock: {flock}"
-    let inBuffer = [|-1; -1; -1; -1; -1; -1; -1|]
-    let inSpan = inBuffer.AsSpan()
+    let buffer = [|7; 7; 7|]
+    let s = buffer.AsSpan()
 
-    Flock.Sick.add inSpan &flock
+    Flock.Happy.pop s &flock
 
-    for elem in flock.Inventory do
+    for elem in buffer do
         printfn $"Buffer: {elem}"
 
     printfn $"Flock: {flock}"
 
 test ()
+// nextPowerOf2 -1
+
+let mutable x = 10
+
+let add1 (a: byref<int>) =
+    a <- a + 1
+
+printfn $"{x}"
+add1 &x
+printfn $"{x}"
+
+type Turkey =
+    internal {
+        mutable Size : int
+        mutable Values: int[]
+    }
+    static member create i =
+        { Size = i; Values = Array.empty }
+    member t.Grow () =
+        t.Size <- t.Size + 1
+
+let changeArray (a: byref<int[]>) =
+    a <- [|1; 2; 3|]
+
+let t = {
+    Size = 10
+    Values = [||]
+}
+
+changeArray (&t.Values)
+t
+
+let readOnlyTest () =
+
+    let a = [|for i in 1..3 do
+                  Turkey.create i |]
+    let r = ReadOnlySpan a
+    let mutable m = &r[0]
+    m.Grow()
+
+    for x in a do
+        printfn $"{x}"
+
+readOnlyTest()
+
+let ts = TimeSpan()
+ts.Days
+
+type Chicken =
+    private {
+        name: string
+    }
+    member c.Name = c.name
