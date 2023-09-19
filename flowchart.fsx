@@ -1058,3 +1058,63 @@
 
 
 [|0 .. 0|]
+
+let s1 = "Chicken"
+let s2 = "Chicken"
+s1 = s2
+
+open System
+
+let test () =
+    let s = "Chicken"
+    let s1 = s.AsSpan ()
+    let ss = s1[^5]
+
+    for e in ss do
+        printfn $"{e}"
+
+test ()
+
+
+type IStaticDictionary<'Key, 'Value> =
+    abstract member Item : 'Key -> 'Value with get
+
+let valueDict =
+    { new IStaticDictionary<'Key, 'Value> with
+            member _.Item
+                with get (k: 'Key) = Unchecked.defaultof<'Value> }
+
+let strDict =
+    { new IStaticDictionary<string, 'Value> with
+        let values = [||]
+        member _.Item
+            with get (k: string) = Unchecked.defaultof<'Value> }
+
+let refDict =
+    { new IStaticDictionary<'Key, 'Value> with
+        member _.Item
+            with get (k: 'Key) = Unchecked.defaultof<'Value> }
+
+let getStaticDict (entries: seq<'Key * 'Value>) : IStaticDictionary<'Key, 'Value> =
+    if typeof<'Key>.IsValueType then
+        valueDict
+    elif typeof<'Key> = typeof<string> then
+        strDict :?> IStaticDictionary<'Key, 'Value>
+    else
+        refDict
+
+let x = t["Chicken"]
+printfn $"{x}"
+
+let x = 6uy
+x + x
+
+16 - 1
+
+let m = [|
+    1; 0; 0; 0
+    0; 1; 0; 0
+    1; 1; 1; 0
+    0; 0; 0; 1
+    0; 0; 1; 0
+|]
