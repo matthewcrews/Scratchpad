@@ -23,7 +23,7 @@ let getSourcesAndTargets (links: seq<Elem * Elem>) =
     let sources = Dictionary<_, Stack<_>>()
     let targets = Dictionary<_, Stack<_>>()
 
-    for (source, target), label in linksAndLabels do
+    for source, target in links do
         match targets.TryGetValue source with
         | true, acc -> acc.Push target
         | false, _ ->
@@ -117,6 +117,89 @@ let insertLinks
 
     newLinks.ToArray()
 
+let computeRowAssignments
+    (targets: IReadOnlyDictionary<Elem, Elem[]>)
+    (sources: IReadOnlyDictionary<Elem, Elem[]>)
+    (colAssignments: IReadOnlyDictionary<Elem, int>)
+    =
+
+    let colCounts = Dictionary<int, int>()
+    let rowAssignments = Dictionary<Elem, int>()
+    let acc = Stack()
+
+    targets
+    |> Seq.map ((|KeyValue|) >> fst)
+    |> Seq.filter (fun elem ->
+        not (sources.ContainsKey elem))
+    |> Seq.iter (fun elem ->
+        acc.Push elem)
+
+    while acc.Count > 0 do
+        let elem = acc.Pop()
+
+        if not (rowAssignments.ContainsKey elem) then
+            let col = colAssignments[elem]
+            match colCounts.TryGetValue col with
+            | true, colCount ->
+                rowAssignments[elem] <- colCount
+                colCounts[col] <- colCount + 1
+            | false, _ ->
+                rowAssignments[elem] <- 0
+                colCounts[col] <- 1
+
+            match targets.TryGetValue elem with
+            | true, targets ->
+                for target in targets do
+                    acc.Push target
+            | false, _ ->
+                ()
+
+    ReadOnlyDictionary rowAssignments, ReadOnlyDictionary colCounts
+
+[<Struct>]
+type Position =
+    {
+        X: float
+        Y: float
+    }
+
+
+let calculatePositions
+    (colCounts: IReadOnlyDictionary<int, int>)
+    (colAssignments: IReadOnlyDictionary<Elem, int>)
+    (rowAssignments: IReadOnlyDictionary<Elem, int>)
+    (links: seq<Elem*Elem>)
+    =
+
+    let height =
+        colCounts
+        |> Seq.map ((|KeyValue|) >> snd)
+        |> Seq.max
+        |> float
+
+    let positions = Dictionary ()
+
+    let calculatePosition elem =
+        let col = colAssignments[elem]
+        let row = float rowAssignments[elem]
+        let colCount = float colCounts[col]
+        let rowHeight = height / colCount
+        let y = row * rowHeight + rowHeight / 2.0
+        let x = float col
+        { X = x; Y = y}
+
+    for source, target in links do
+
+        if not (positions.ContainsKey source) then
+            let newPosition = calculatePosition source
+            positions[source] <- newPosition
+
+        if not (positions.ContainsKey target) then
+            let newPosition = calculatePosition target
+            positions[target] <- newPosition
+
+    ReadOnlyDictionary positions
+
 
 
 let links =
@@ -133,13 +216,12 @@ let newLinks =
     |> Array.map fst
 let newSources, newTargets = getSourcesAndTargets newLinks
 let newColAssignments = calculateColumnAssignments newSources newTargets
+let rowAssignments, colCounts = computeRowAssignments newSources newTargets newColAssignments
+let newPositions = calculatePositions colCounts newColAssignments rowAssignments newLinks
 
+for KeyValue(elem, position) in newPositions do
+    printfn $"{elem}, {position}"
 
-
-
-let colOrdering = calculateColumnOrdering newSources newTargets newColAssignments
-
-let newColAssignments = Dictionary()
 
 
 
