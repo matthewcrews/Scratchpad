@@ -1,5 +1,275 @@
 # F# for the Analyst and the Performance Engineer
 
+## F#: A Language for Innovation
+
+## Formula for Innovation
+
+Rate of Innovation = Speed of Development * Speed of Execution
+
+> F# is an excellent language for quickly creating working code. F# can also be easily optimized to have near C Levels of performance
+
+## Who am I?
+
+Software Engineer for Simulation Dynamics building high-performance simulations for the optimization of Supply Chains, Warehouses, and Manufacturing Facilities
+
+## Aidos
+
+A simulation engine for Discrete-Rate Simulation
+
+## Speed of Development
+
+How quickly can we go from an idea to working code.
+
+### Types are Easy to Define
+
+F# features a type system which makes it easy to express a problem using simple types. F# has an Algebraic Type system which enables powerful type inference which reduces the amount of code that needs to be written while still being statically typed (the importance of static typing will come up later.).
+
+Define a Record
+```fsharp
+type Chicken =
+    {
+        Name: string
+        Size: float
+        Age: int
+    }
+```
+
+```asm
+
+_.add(Int32, Int32)
+    L0000: lea eax, [ecx+edx]
+    L0003: ret
+
+```
+
+Define a Discriminated Union
+```fsharp
+type Animal =
+    | Chicken of Chicken
+    | Goose of Goose
+    | Turkey of Turkey
+```
+
+### Why is the F# Type System Special?
+
+Many bugs in software come from imprecise models of the problem. Imprecise models make it easier to create non-sensical states which can be difficult to debug.
+
+It is common to have a pure domain of types at the core of a project which ensure that assumptions have been validated before any business logic is executed.
+
+```fsharp
+type Chicken =
+    {
+        Name: string
+        Size: float
+        Age: int
+    }
+
+module Chicken =
+
+    let create name size age =
+        if size <= 0.0 then
+            invalidArg (nameof size) "Cannot have negative size"
+
+        if age <= 0 then
+            invalidArg (nameof age) "Cannot have Chicken with negative age"
+
+        if 
+
+```
+
+### The Absence of Null
+
+While F# has nulls, the are uncommon in pure F# code. They exist for compatibility with the broader .NET ecosystem. F# provides many facilities for protecting users from creating null reference exceptions
+
+
+### Computation Expressions
+
+Analysts want to work as close to their domain as possible. Ideally the API they are working with reflects the reality of the problem they are trying to solve. Computation Expressions (CEs) make it possible to create an API that is in the language of the problem itself. This speeds up the development of analysts and makes it easier to catch problems with business logic.
+
+## Speed of Execution
+
+### Pillars of Performance
+
+All of software performance can be summed up with the following:
+
+Do less, with less, in a predictable way.
+
+### Why is that true?
+
+Modern CPUs are essentially data transform factories. They have fast execution units at their center but those execution units need to have work prepared for them by a front end and data fed from the cache. The 
+
+### But the GC is Slow
+
+Allocations in .NET are incredibly fast (<10ns). It's the collection of garbage that is actually slow. While the .NET API encourages the creating of many objects on the heap, it is not necessary. Let's discuss some common approaches to reducing or eleminating GC.
+
+#### Use a Struct
+
+If a piece of data only needs to exist for a short time, don't allocate it on the heap. You can create it on the stack and pass it by reference if you want.
+
+#### Use the ArrayPool
+
+.NET has a shared ArrayPool which allows you to grab an array, use it, and then return it. The array will then remain in the pool until you need it again. This can significantly cut down on the allocation of arrays which are only used for small pieces of logic.
+
+#### Use StackAlloc Memory
+
+If you only need a small buffer, consider using StackAlloc. StackAlloc buffers should be small. They are incredibly fast though since their memory, by definition will be hot and in the L1 cache.
+
+#### Use ObjectPools
+
+If you have a collection type that you using frequently for a short period of time, consider creating a an ObjectPool. This will keep the Garbage Collector from needing to collect and clean the memory.
+
+#### Allocate Arrays of Structs
+
+Instead of creating many, small objects on the heap, instead create a large array for the given struct type. This marries with the ECS style.
+
+### Entity Component System Architecture
+
+Many modern, high-performance games use an Entity Component System (ECS) style of architecture. The ECS style encourages us to layout the data of a program in a more database-like way. We then use indexes to represent the different entities of our program. The index is then used to look up data about the entities in our program. This reduces the overall size of the working set of data which allows our programs to be faster since more of it exists in cache.
+
+It also reduces the number of objects that the GC needs to keep track of since almost everything in a program has become a set of arrays.
+
+#### Units of Measure
+
+If we represented all of the indexes in our program as just an `int`, it would be easy to loose track of what an index is meant to refer to. Thankfully, F# has a unique feature which is Units of Measure. Units of Measure allow us to annotate numeric primitives with the units they are meant to represent. Originally intended for validating algebra, it also has great applications in the domain of ECS.
+
+We will leverage this capability to create wrappers for Arrays which enforce correcting types when indexing into data.
+
+#### Bar Collection
+
+```fsharp
+[<Struct>]
+type Bar<[<Measure>] 'Measure, 'T> (values: 'T[]) =
+
+    [<EditorBrowsable(EditorBrowsableState.Never)>]
+    member _._values = values
+
+    member inline b.Length = LanguagePrimitives.Int32WithMeasure<'Measure> b._values.Length
+
+    member b.Item
+        with inline get(i: int<'Measure>) =
+            b._values[int i]
+```
+
+#### Row Collection
+
+```fsharp
+[<Struct>]
+type Row<[<Measure>] 'Measure, 'T>(values: 'T[]) =
+
+    [<EditorBrowsable(EditorBrowsableState.Never)>]
+    member _._values : 'T[] = values
+
+    member r.Item
+        with inline get (i: int<'Measure>) =
+            r._values[int i]
+
+        and inline set (index: int<'Measure>) value =
+            r._values[int index] <- value
+
+    member inline r.Length = LanguagePrimitives.Int32WithMeasure<'Measure> r._values.Length
+```
+
+#### Usage of Bar and Row
+
+```fsharp
+let chickenAges = Bar<Chicken, _> [|0; 1; 5; 0; 2|]
+let chickenIndex = 1<Chicken>
+// The Compiler enforces the correct units on the indexing Int
+let chickenAge = chickenAges[chickenIndex]
+
+// Non-Chicken Index
+let cowIndex = 1<Cow>
+// This a compiler error since the units of the indexing value
+// does not match the expectation of the collection
+let cowAge = chickenAges[cowIndex]
+```
+
+#### BitSet Collection
+
+```fsharp
+type BitSet<[<Measure>] 'Measure> internal (capacity: int, buckets: uint64[]) =
+
+    new (itemCount: int) =
+        let bucketsRequired = (itemCount + 63) >>> 6
+        let buckets : uint64[] = Array.zeroCreate bucketsRequired
+        BitSet<_> (itemCount, buckets)
+
+    /// WARNING: Not intended for consumption. This needs to be public to support inlining.
+    [<EditorBrowsable(EditorBrowsableState.Never)>]
+    member _._itemCount = capacity
+    /// WARNING: Not intended for consumption. This needs to be public to support inlining.
+    [<EditorBrowsable(EditorBrowsableState.Never)>]
+    member _._buckets = buckets
+```
+
+#### BitSet Methods
+
+```fsharp
+member b.Item
+    with inline get (itemKey: int<'Measure>) =
+        let bucketId, mask = Helpers.computeBucketAndMask itemKey b._itemCount
+        let buckets = b._buckets
+        let bucket = buckets[bucketId]
+        (bucket &&& mask) <> 0UL
+
+member b.Contains (itemKey: int<'Measure>) =
+    let bucketId, mask = Helpers.computeBucketAndMask itemKey b._itemCount
+    let buckets = b._buckets
+    let bucket = buckets[bucketId]
+    (bucket &&& mask) <> 0UL
+
+member inline b.Add (itemKey: int<'Measure>) =
+    let bucketId, mask = Helpers.computeBucketAndMask itemKey b._itemCount
+    let buckets = b._buckets
+    let bucket = buckets[bucketId]
+    buckets[bucketId] <- bucket ||| mask
+
+member inline b.Remove (itemKey: int<'Measure>) =
+    let bucketId, mask = Helpers.computeBucketAndMask itemKey b._itemCount
+    let buckets = b._buckets
+    let bucket = buckets[bucketId]
+    buckets[bucketId] <- bucket &&& ~~~mask
+```
+
+#### BitSet Usage
+
+```fsharp
+let constraintUp = BitSet<Constraint, _> 100
+
+let constraintIndex = 10<Constraint>
+
+let constraintIsUp = constraintUp[constraintIndex]
+```
+
+
+#### Struct of Arrays
+
+```fsharp
+type Flock =
+    {
+        Name: Bar<Chicken, string>
+        Size: Row<Chicken, float>
+        Age: Bar<Chicken, int>
+        IsActive: BitSet<Chicken>
+    }
+```
+
+
+## The Innovation
+
+F# unique set of features enabled us to rapidly create a Discrete-Rate Simulation engine that we could then quickly iterate on. The concise syntax made it easy to refactor and the robust type system means that clearly express out computation. This gave us the most valuable possible resource: time.
+
+We were able to use the time F# gave us back to develop a new algorithm for solving the max-flow problem at the heart of Discrete-Rate Simulation. This new algorithm gives Aidos a 600x performance advantage over industry standard simulation engines.
+
+## Conclusion
+
+- F#'s concise syntax and expressive type system makes it easy to write correct code quickly
+- F# and .NET allows you to evolve the performance of your program to meet your performance requirements
+- Together this makes F# an excellent language for developing innnovative software products that vastly outperform the rest of the industry
+
+
+-- Old Version --
+
 ## The Analyst and the Engineer
 
 What is the difference between an Analyst and an Engineer? An Analyst typically has a question that The Business wants answered, the sooner the better. Therefore the Analyst isn't interested in having to build up a set of tools or primitives to start working on the question. Rather, they want to have all the tools included so they can focus on answering the question. They don't want to implement data structures. They don't want to have to think about data layout or how the hardware works. They want as much of the implementation obfuscated so they can focus on answering the business question.
