@@ -6,18 +6,30 @@ type Elem =
     | Node of string
     | Label of string
 
-let linksAndLabels = [
-    (Elem.Node "Plant CAI", Elem.Node "DC MEM"), Elem.Label "100.0"
-    (Elem.Node "DC MEM", Elem.Node "DC REO"), Elem.Label "45"
-    (Elem.Node "DC MEM", Elem.Node "DC Chicken"), Elem.Label "67.3"
-    (Elem.Node "DC MEM", Elem.Node "Customer"), Elem.Label "89.4"
-    (Elem.Node "DC REO", Elem.Node "Customer"), Elem.Label "42.1"
-    (Elem.Node "DC Chicken", Elem.Node "Customer"), Elem.Label "98.3"
-]
+[<Struct>]
+type Position =
+    {
+        X: float
+        Y: float
+    }
 
-type Node =
-    | Location of string
-    | Label of string
+[<NoComparison; NoEquality>]
+type Layout =
+    {
+        ElemPositions: ReadOnlyDictionary<Elem, Position>
+        LabelPositions: ReadOnlyDictionary<string, Position>
+        Links: list<Elem * Elem>
+    }
+
+
+let toDomain
+    (linksAndLabels: list<(string * string) * string>)
+    =
+
+    linksAndLabels
+    |> List.map (fun ((source, target), label) ->
+        (Elem.Node source, Elem.Node target), label)
+
 
 let getSourcesAndTargets (links: seq<Elem * Elem>) =
     let sources = Dictionary<_, Stack<_>>()
@@ -100,7 +112,7 @@ let calculateColumnAssignments
 
 let insertLinks
     (colAssignments: IReadOnlyDictionary<Elem, int>)
-    (linksAndLabels: list<(Elem * Elem) * Elem>)
+    (linksAndLabels: list<(Elem * Elem) * string>)
     =
     // We now need to insert labels when Nodes are not in adjacent columns
     let newLinks = Stack ()
@@ -110,12 +122,12 @@ let insertLinks
         let targetCol = colAssignments[target]
 
         if targetCol > sourceCol + 1 then
-            newLinks.Push ((source, label), None)
-            newLinks.Push ((label, target), None)
+            newLinks.Push ((source, Elem.Label label), None)
+            newLinks.Push ((Elem.Label label, target), None)
         else
             newLinks.Push ((source, target), Some label)
 
-    newLinks.ToArray()
+    List.ofSeq newLinks
 
 let computeRowAssignments
     (targets: IReadOnlyDictionary<Elem, Elem[]>)
@@ -156,12 +168,15 @@ let computeRowAssignments
 
     ReadOnlyDictionary rowAssignments, ReadOnlyDictionary colCounts
 
-[<Struct>]
-type Position =
-    {
-        X: float
-        Y: float
-    }
+// let adjustColCounts
+//     (colCounts: ReadOnlyDictionary<int, int>)
+//     (targets: IReadOnlyDictionary<Elem, Elem[]>)
+//     (sources: IReadOnlyDictionary<Elem, Elem[]>)
+//     (colAssignments: IReadOnlyDictionary<Elem, int>)
+//     =
+
+
+
 
 
 let calculatePositions
@@ -185,7 +200,7 @@ let calculatePositions
         let colCount = float colCounts[col]
         let rowHeight = height / colCount
         let y = row * rowHeight + rowHeight / 2.0
-        let x = float col
+        let x = 0.5 + float col
         { X = x; Y = y}
 
     for source, target in links do
@@ -201,47 +216,66 @@ let calculatePositions
     ReadOnlyDictionary positions
 
 
+let generateLayout
+    (linksAndLabels: list<(string * string) * string>)
+    : Layout
+    =
 
-let links =
-    linksAndLabels
-    |> List.map fst
+    let linksAndLabels = toDomain linksAndLabels
 
-let sources, targets = getSourcesAndTargets links
-let colAssignments = calculateColumnAssignments sources targets
-let newLinksAndLabels = insertLinks colAssignments linksAndLabels
+    let links =
+        linksAndLabels
+        |> List.map fst
 
-
-let newLinks =
-    newLinksAndLabels
-    |> Array.map fst
-let newSources, newTargets = getSourcesAndTargets newLinks
-let newColAssignments = calculateColumnAssignments newSources newTargets
-let rowAssignments, colCounts = computeRowAssignments newSources newTargets newColAssignments
-let newPositions = calculatePositions colCounts newColAssignments rowAssignments newLinks
-
-for KeyValue(elem, position) in newPositions do
-    printfn $"{elem}, {position}"
+    let sources, targets = getSourcesAndTargets links
+    let colAssignments = calculateColumnAssignments sources targets
+    let newLinksAndLabels = insertLinks colAssignments linksAndLabels
 
 
+    let newLinks =
+        newLinksAndLabels
+        |> List.map fst
+    let newSources, newTargets = getSourcesAndTargets newLinks
+    let newColAssignments = calculateColumnAssignments newSources newTargets
+    let rowAssignments, colCounts = computeRowAssignments newSources newTargets newColAssignments
+    // let colCounts = adjustColCounts newSources newTargets newColAssignments
+    let newPositions = calculatePositions colCounts newColAssignments rowAssignments newLinks
+
+    let labelPositions =
+        newLinksAndLabels
+        |> List.choose (fun ((source, target), label) ->
+            label
+            |> Option.map (fun label ->
+                let sourcePos = newPositions[source]
+                let targetPos = newPositions[target]
+                let newPosition =
+                    {
+                        X = (targetPos.X - sourcePos.X) / 2.0 + sourcePos.X
+                        Y = (targetPos.Y - sourcePos.Y) / 2.0 + sourcePos.Y
+                    }
+                KeyValuePair (label, newPosition)))
+        |> Dictionary
+        |> ReadOnlyDictionary
+
+    for KeyValue(elem, position) in newPositions do
+        printfn $"{elem}, {position}"
+
+    {
+        ElemPositions = newPositions
+        LabelPositions = labelPositions
+        Links = newLinks
+    }
 
 
-    // if not (columnAssignments.ContainsKey node) then
-    //     columnAssignments[node] <- column
-    //     // Increment the count for the number of Nodes in the Column
-    //     match columnCounts.TryGetValue column with
-    //     | true, curCount ->
-    //         columnCounts[column] <- curCount + 1
-    //     | false, _ ->
-    //         columnCounts[column] <- 1
+let linksAndLabels = [
+    ("Plant CAI",   "DC MEM"),      "100.0"
+    ("DC MEM",      "DC REO"),      "45"
+    ("DC MEM",      "DC Chicken"),  "67.3"
+    ("DC MEM",      "Customer"),    "89.4"
+    ("DC REO",      "Customer"),    "42.1"
+    ("DC Chicken",  "Monkey"),    "98.3"
+    ("Monkey", "Customer"), "87"
+]
 
-let rowCount =
-    columnCounts
-    |> Seq.maxBy (fun kvp -> kvp.Value)
-    |> (|KeyValue|)
-    |> snd
-
-let colCount =
-    columnCounts
-    |> Seq.maxBy (fun kvp -> kvp.Key)
-    |> (|KeyValue|)
-    |> fst
+let layout = generateLayout linksAndLabels
+layout
