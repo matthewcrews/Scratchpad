@@ -7,20 +7,9 @@ type Elem =
     | Label of string
 
 [<Struct>]
-type Position =
-    {
-        X: float
-        Y: float
-    }
-
-[<NoComparison; NoEquality>]
-type Layout =
-    {
-        ElemPositions: ReadOnlyDictionary<Elem, Position>
-        LabelPositions: ReadOnlyDictionary<string, Position>
-        Links: list<Elem * Elem>
-    }
-
+type Point (x: float, y: float) =
+    member _.X = x
+    member _.Y = y
 
 let toDomain
     (linksAndLabels: list<(string * string) * string>)
@@ -161,22 +150,51 @@ let computeRowAssignments
 
             match targets.TryGetValue elem with
             | true, targets ->
+                // Move Nodes to the top
+                targets
+                |> Array.sortInPlaceBy (fun elem ->
+                    match elem with
+                    | Elem.Node _ -> 0
+                    | Elem.Label _ -> 1)
                 for target in targets do
                     acc.Push target
             | false, _ ->
                 ()
 
-    ReadOnlyDictionary rowAssignments, ReadOnlyDictionary colCounts
+    ReadOnlyDictionary rowAssignments, colCounts
 
-// let adjustColCounts
-//     (colCounts: ReadOnlyDictionary<int, int>)
-//     (targets: IReadOnlyDictionary<Elem, Elem[]>)
-//     (sources: IReadOnlyDictionary<Elem, Elem[]>)
-//     (colAssignments: IReadOnlyDictionary<Elem, int>)
-//     =
+let adjustColCounts
+    (targets: IReadOnlyDictionary<Elem, Elem[]>)
+    (sources: IReadOnlyDictionary<Elem, Elem[]>)
+    (colAssignments: IReadOnlyDictionary<Elem, int>)
+    (colCounts: Dictionary<int, int>)
+    =
 
+    let acc = Stack()
 
+    targets
+    |> Seq.map ((|KeyValue|) >> fst)
+    |> Seq.filter (fun elem ->
+        not (sources.ContainsKey elem))
+    |> Seq.iter (fun elem ->
+        acc.Push elem)
 
+    while acc.Count > 0 do
+        let n = acc.Pop()
+        let nCol = colAssignments[n]
+        match targets.TryGetValue n with
+        | true, targets ->
+            for t in targets do
+            let tCol = colAssignments[t]
+            let mutable col = nCol + 1
+
+            while col < tCol do
+                colCounts[col] <- colCounts[col] + 1
+                col <- col + 1
+
+            acc.Push t
+        | false, _ ->
+            ()
 
 
 let calculatePositions
@@ -201,7 +219,7 @@ let calculatePositions
         let rowHeight = height / colCount
         let y = row * rowHeight + rowHeight / 2.0
         let x = 0.5 + float col
-        { X = x; Y = y}
+        Point (x, y)
 
     for source, target in links do
 
@@ -218,7 +236,7 @@ let calculatePositions
 
 let generateLayout
     (linksAndLabels: list<(string * string) * string>)
-    : Layout
+    : ReadOnlyDictionary<Elem, Point>
     =
 
     let linksAndLabels = toDomain linksAndLabels
@@ -238,33 +256,9 @@ let generateLayout
     let newSources, newTargets = getSourcesAndTargets newLinks
     let newColAssignments = calculateColumnAssignments newSources newTargets
     let rowAssignments, colCounts = computeRowAssignments newSources newTargets newColAssignments
-    // let colCounts = adjustColCounts newSources newTargets newColAssignments
+    adjustColCounts newSources newTargets newColAssignments colCounts
     let newPositions = calculatePositions colCounts newColAssignments rowAssignments newLinks
-
-    let labelPositions =
-        newLinksAndLabels
-        |> List.choose (fun ((source, target), label) ->
-            label
-            |> Option.map (fun label ->
-                let sourcePos = newPositions[source]
-                let targetPos = newPositions[target]
-                let newPosition =
-                    {
-                        X = (targetPos.X - sourcePos.X) / 2.0 + sourcePos.X
-                        Y = (targetPos.Y - sourcePos.Y) / 2.0 + sourcePos.Y
-                    }
-                KeyValuePair (label, newPosition)))
-        |> Dictionary
-        |> ReadOnlyDictionary
-
-    for KeyValue(elem, position) in newPositions do
-        printfn $"{elem}, {position}"
-
-    {
-        ElemPositions = newPositions
-        LabelPositions = labelPositions
-        Links = newLinks
-    }
+    newPositions
 
 
 let linksAndLabels = [
@@ -279,3 +273,5 @@ let linksAndLabels = [
 
 let layout = generateLayout linksAndLabels
 layout
+
+[0..0]
