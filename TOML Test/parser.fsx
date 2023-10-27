@@ -123,7 +123,8 @@ type ParseResult =
     {
         Buffers: Dictionary<Label.Buffer, string>
         Constraints: Dictionary<Label.Constraint, string>
-        // Merges: Dictionary<string, string>
+        Splits: Dictionary<Label.Split, string>
+        Merges: Dictionary<Label.Merge, string>
         Links: HashSet<string * string>
     }
 
@@ -197,7 +198,7 @@ let parse (text: string) =
     let buffers = Dictionary()
     let constraints = Dictionary()
     let splits = Dictionary()
-    // let merges = Dictionary()
+    let merges = Dictionary()
     let labelTypes = Dictionary<string, LabelType>()
     
     let noSource = HashSet()
@@ -245,7 +246,10 @@ let parse (text: string) =
                     parseLabelNamePair lineNumber "Split" line
                     |> (addLabelAndName labelLines nameLines labelTypes LabelType.Split splits Label.Split lineNumber)
 
-            
+            | Section.Merges ->
+                result <-
+                    parseLabelNamePair lineNumber "Merge" line
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Merge merges Label.Merge lineNumber)
             
             | Section.Links ->
                 result <-
@@ -361,8 +365,9 @@ let parse (text: string) =
         {
             Buffers = buffers
             Constraints = constraints
-            // Merges = merges
-            Links = linkLines
+            Splits = splits
+            Merges = merges
+            Links = HashSet linkLines.Keys
         })
 
 
