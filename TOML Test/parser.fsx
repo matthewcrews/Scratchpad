@@ -25,8 +25,8 @@ type Section =
     | Constraints
     | Splits
     | Merges
-    | Conveyors
-    | Conversions
+    // | Conveyors
+    // | Conversions
     | Links
     | None
 
@@ -37,6 +37,11 @@ let (|IsWhitespace|_|) (x: string) =
 
 let (|IsHeader|_|) (x: string) =
     match x.Contains '[' && x.Contains ']' with
+    | true -> Some ()
+    | false -> None
+
+let (|IsComment|_|) (x: string) =
+    match x.Trim().StartsWith "//" with
     | true -> Some ()
     | false -> None
 
@@ -66,10 +71,24 @@ let parseLink (ln: int) (s: string) =
         | [|_|] ->
             Error $"Invalid link on line {ln}. Missing source or target"
 
-        | [|source; target|] ->
-            let newSource = source.Trim()
-            let newTarget = target.Trim()
-            Ok (newSource, newTarget)
+        | [|sources; targets|] ->
+            let newSources = 
+                sources.Split ','
+                |> Array.map (fun source ->
+                source.Trim())
+            let newTargets =
+                targets.Split ','
+                |> Array.map (fun target ->
+                    target.Trim())
+            match sources.Length > 0, targets.Length > 0 with
+            | true, true ->
+                Ok (newSources, newTargets)
+            | true, false ->
+                Error $"Invalid link on line {ln}. Missing target."
+            | false, true ->
+                Error $"Invalid link on line {ln}. Missing source."
+            | false, false ->
+                Error $"Invalid link on line {ln}. Missing source and target."
 
         | _ ->
             Error $"Invalid link on line {ln}. Too many connections"
@@ -95,8 +114,8 @@ type LabelType =
     | Constraint
     | Split
     | Merge
-    | Conveyor
-    | Converison
+    // | Conveyor
+    // | Converison
 
 
 [<NoComparison; NoEquality>]
@@ -138,6 +157,7 @@ let addLabelAndName
         | (true, labelPrevLineNumber), (true, namePrevLineNumber) ->
             Error $"Duplicate label {label} and name {name} on line {lineNumber}. Label previously declared on line {labelPrevLineNumber}. Name previously declared on line {namePrevLineNumber}")
 
+
 let parseHeader
     lineNumber
     (section: byref<Section>)
@@ -157,12 +177,12 @@ let parseHeader
     | Headers.MERGES ->
         section <- Section.Merges
         Ok ()
-    | Headers.CONVEYORS ->
-        section <- Section.Conveyors
-        Ok ()
-    | Headers.CONVERSIONS ->
-        section <- Section.Conversions
-        Ok ()
+    // | Headers.CONVEYORS ->
+    //     section <- Section.Conveyors
+    //     Ok ()
+    // | Headers.CONVERSIONS ->
+    //     section <- Section.Conversions
+    //     Ok ()
     | Headers.LINKS ->
         section <- Section.Links
         Ok ()
@@ -173,14 +193,15 @@ let parseHeader
 let parse (text: string) =
     let labelLines = Dictionary()
     let nameLines = Dictionary()
-    let links = HashSet()
+    let linkLines = Dictionary()
     let buffers = Dictionary()
     let constraints = Dictionary()
+    let splits = Dictionary()
     // let merges = Dictionary()
     let labelTypes = Dictionary<string, LabelType>()
     
-    let hasSource = HashSet()
-    let hasTarget = HashSet()
+    let noSource = HashSet()
+    let noTarget = HashSet()
 
     let mutable section = Section.None
     let mutable result = Ok ()
@@ -190,8 +211,15 @@ let parse (text: string) =
 
     while not (isNull nextLine) && (Result.isOk result) do
 
-        match nextLine with
-        | IsWhitespace -> 
+        let cleanedLine =
+            if nextLine.Contains "//" then
+                let commentStart = nextLine.IndexOf "//"
+                nextLine.Substring (0, commentStart)
+            else
+                nextLine
+
+        match cleanedLine with
+        | IsWhitespace ->
             ()
 
         | IsHeader ->
@@ -211,57 +239,116 @@ let parse (text: string) =
                 result <-
                     parseLabelNamePair lineNumber "Constraint" line
                     |> (addLabelAndName labelLines nameLines labelTypes LabelType.Constraint constraints Label.Constraint lineNumber)
+            
+            | Section.Splits ->
+                result <-
+                    parseLabelNamePair lineNumber "Split" line
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Split splits Label.Split lineNumber)
 
+            
+            
             | Section.Links ->
                 result <-
                     parseLink lineNumber line
-                    |> Result.bind (fun (source, target) ->
-                        match labelTypes[source] with
-                        | LabelType.Buffer ->
-                            match hasTarget.Add source with
-                            | true -> 
-                                Ok (source, target)
-                            | false ->
-                                Error $"Invalid link on line {lineNumber}. Buffer {source} already has target."
-                        | LabelType.Constraint ->
-                            match hasTarget.Add source with
-                            | true -> 
-                                Ok (source, target)
-                            | false ->
-                                Error $"Invalid link on line {lineNumber}. Constraint {source} already has target.")
-                    |> Result.bind (fun (source, target) ->
-                        match labelTypes[target] with
-                        | LabelType.Buffer ->
-                            match hasSource.Add target with
-                            | true -> 
-                                Ok (source, target)
-                            | false ->
-                                Error $"Invalid link on line {lineNumber}. Buffer {target} already has source."
-
-                        | LabelType.Constraint ->
-                            match hasSource.Add target with
-                            | true -> 
-                                Ok (source, target)
-                            | false ->
-                                Error $"Invalid link on line {lineNumber}. Constraint {target} already has source.")
-                    |> Result.bind (fun (source, target) ->
-                        match labelLines.ContainsKey source, labelLines.ContainsKey target with
+                    |> Result.bind (fun (sources, targets) ->
+                        // At this point I know that Sources and Targets have a length > 0
+                        match sources.Length > 1, targets.Length > 1 with
                         | true, true ->
-                            match links.Add (source, target) with
-                            | true ->
-                                Ok ()
-
-                            | false ->
-                                Error $"Repeated link on line {lineNumber}. {source} is already connected to {target}"
-
-                        | false, true ->
-                            Error $"Invalid link on line {lineNumber}. The source {source} does not exist"
-
-                        | true, false ->
-                            Error $"Invalid link on line {lineNumber}. The target {target} does not exist"
-
+                            Error $"Invalid link on line {lineNumber}. Cannot have multi-way links."
                         | false, false ->
-                            Error $"Invalid link on line {lineNumber}. The source {source} and the target {target} do not exist")
+                            Ok [|sources[0], targets[0]|]
+                        | false, true ->
+                            let source = sources[0]
+                            match labelTypes.TryGetValue source with
+                            | true, labelType ->
+                                match labelType with
+                                | LabelType.Split ->
+                                    let links =
+                                        targets
+                                        |> Array.map (fun target ->
+                                            source, target)
+                                    Ok links
+                                | _ ->
+                                    Error $"Invalid link on line {lineNumber}. Only Split nodes can have multilple targets."
+
+                            | false, _ ->
+                                Error $"Invalid source on line {lineNumber}. The source has not been declared"
+                        | true, false ->
+                            let target = targets[0]
+                            match labelTypes.TryGetValue target with
+                            | true, labelType ->
+                                match labelType with
+                                | LabelType.Merge ->
+                                    let links =
+                                        sources
+                                        |> Array.map (fun source ->
+                                            source, target)
+                                    Ok links
+                                | _ ->
+                                    Error $"Invalid link on line {lineNumber}. Only Merge nodes can have multiple sources."
+
+                            | false, _ ->
+                                Error $"Invalid target on line {lineNumber}. The target has not been declared"
+                    )
+                    |> Result.bind (fun (links: (string * string)[]) ->
+                        
+                        (Ok (), links)
+                        ||> Array.fold (fun state (source, target) ->
+                            
+                            state
+                            |> Result.bind (fun () ->
+                                match labelTypes.TryGetValue source, labelTypes.TryGetValue target with
+                                | (true, sourceType), (true, targetType) ->
+                                    match linkLines.TryGetValue ((source, target)) with
+                                    | true, prevLineNumber ->
+                                        if lineNumber = prevLineNumber then
+                                            Error $"Repeated link on line {lineNumber}. {source} is connected to {target} multiple times on line {prevLineNumber}"
+                                        else
+                                            Error $"Duplicate link on line {lineNumber}. {source} is already connected to {target} from line {prevLineNumber}"
+
+                                    | false, _ ->
+                                        
+                                        match noTarget.Add source, noSource.Add target with
+                                        | true, true ->
+                                            linkLines[(source, target)] <- lineNumber
+                                            Ok ()
+
+                                        | true, false ->
+                                            match targetType with
+                                            | LabelType.Merge ->
+                                                linkLines[(source, target)] <- lineNumber
+                                                Ok ()
+                                            | _ ->
+                                                Error $"Invalid link on line {lineNumber}. The target {target} cannot have multiple sources"
+
+                                        | false, true ->
+                                            match sourceType with
+                                            | LabelType.Split ->
+                                                linkLines[(source, target)] <- lineNumber
+                                                Ok ()
+                                            | _ ->
+                                                Error $"Invalid link on line {lineNumber}. The source {source} cannot have multiple targets"
+
+                                        | false, false ->
+                                            match sourceType, targetType with
+                                            | LabelType.Merge, LabelType.Split ->
+                                                linkLines[(source, target)] <- lineNumber
+                                                Ok ()
+                                            | LabelType.Merge, _ ->
+                                                Error $"Invalid link on line {lineNumber}. The target {target} cannot have multiple sources"
+                                            | _, LabelType.Split ->
+                                                Error $"Invalid link on line {lineNumber}. The source {source} cannot have multiple targets"
+                                            | _, _ ->
+                                                Error $"Invalid link on line {lineNumber}. The source {source} cannot have multiple targets and the target {target} cannot have multilple sources."
+
+                                | (false, _), (true, _) ->
+                                    Error $"Invalid link on line {lineNumber}. The source {source} does not exist"
+
+                                | (true, _), (false, _) ->
+                                    Error $"Invalid link on line {lineNumber}. The target {target} does not exist"
+
+                                | (false, _), (false, _) ->
+                                    Error $"Invalid link on line {lineNumber}. The source {source} and the target {target} do not exist")))
                         
                         
 
@@ -275,23 +362,23 @@ let parse (text: string) =
             Buffers = buffers
             Constraints = constraints
             // Merges = merges
-            Links = links
+            Links = linkLines
         })
 
 
 let text = """
 [Buffers]
 b1: Buffer 1
-b2: Buffer 2
+b2 // My Comment
 b3
 
 [Constraints]
+// Another comment
 c1
 
 [Links]
 b1 -> c1
 c1 -> b2
-b2 -> b3
 """
 
 match parse text with
