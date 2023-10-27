@@ -376,16 +376,31 @@ let text = """
 b1: Buffer 1
 b2 // My Comment
 b3
+b4
+b5
+b6
 
 [Constraints]
 // Another comment
 c1
 
+[Splits]
+s1
+
+[Merges]
+m1
+
 [Links]
 b1 -> c1
 c1 -> b2
+s1 -> b1, b3
+b4, b5 -> m1
+s1 -> b6
 """
 
 match parse text with
-| Ok m -> printfn $"{m}"
+| Ok m -> 
+    printfn $"{m}"
+    for link in m.Links do
+        printfn $"{link}"
 | Error err -> printfn $"{err}"
