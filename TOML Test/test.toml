@@ -1,0 +1,12 @@
+[Buffers]
+b1 = "Buffer 1"
+b2 = "Buffer 2"
+
+[Constraints]
+c1 = "Constraint 1"
+
+[Structure]
+Links = [
+    "b1 -> c1",
+    "c1 -> b2"
+]

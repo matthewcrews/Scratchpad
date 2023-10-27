@@ -3,4 +3,8 @@
   <path d="M20,40 a20,20 0 0 1 20,20 a 20,20 0 0 0 20,-20 a 20,20 0 0 0 20,20" stroke="red" fill="transparent" stroke-width="2"/>
   <path d="M20,80 a 5 5 0 0 0 5 -5" stroke="red" fill="transparent" stroke-width="2"/> -->
   <path d="M 0 0 q 10 0 20 10 t 20 10" stroke="red" fill="transparent" stroke-width="2"/>
+  <!-- <path d="M 90 37.5 q 15 0 30 -12.5 t 30 -12.5" stroke="red" fill="transparent" stroke-width="2"/> -->
+  <path d="M 90 37.5 A 105 37.5 120 25 T 120 25" stroke="blue" fill="transparent" stroke-width="2"/>
+  <path d="M 0 100 Q 110 100 150 50 T 300 0" stroke="blue" fill="transparent"/>
+  <!-- <path d="M x-source y-source Q x-curve-control y-source x-center y-center T x-target y-target" stroke="blue" fill="transparent"/> -->
 </svg>
