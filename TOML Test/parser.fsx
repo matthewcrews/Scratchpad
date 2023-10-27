@@ -25,8 +25,8 @@ type Section =
     | Constraints
     | Splits
     | Merges
-    // | Conveyors
-    // | Conversions
+    | Conveyors
+    | Conversions
     | Links
     | None
 
@@ -114,8 +114,8 @@ type LabelType =
     | Constraint
     | Split
     | Merge
-    // | Conveyor
-    // | Converison
+    | Conveyor
+    | Converison
 
 
 [<NoComparison; NoEquality>]
@@ -125,6 +125,8 @@ type ParseResult =
         Constraints: Dictionary<Label.Constraint, string>
         Splits: Dictionary<Label.Split, string>
         Merges: Dictionary<Label.Merge, string>
+        Conveyors: Dictionary<Label.Conveyor, string>
+        Conversions: Dictionary<Label.Conversion, string>
         Links: HashSet<string * string>
     }
 
@@ -178,12 +180,12 @@ let parseHeader
     | Headers.MERGES ->
         section <- Section.Merges
         Ok ()
-    // | Headers.CONVEYORS ->
-    //     section <- Section.Conveyors
-    //     Ok ()
-    // | Headers.CONVERSIONS ->
-    //     section <- Section.Conversions
-    //     Ok ()
+    | Headers.CONVEYORS ->
+        section <- Section.Conveyors
+        Ok ()
+    | Headers.CONVERSIONS ->
+        section <- Section.Conversions
+        Ok ()
     | Headers.LINKS ->
         section <- Section.Links
         Ok ()
@@ -199,6 +201,8 @@ let parse (text: string) =
     let constraints = Dictionary()
     let splits = Dictionary()
     let merges = Dictionary()
+    let conveyors = Dictionary()
+    let conversions = Dictionary()
     let labelTypes = Dictionary<string, LabelType>()
     
     let noSource = HashSet()
@@ -251,6 +255,16 @@ let parse (text: string) =
                     parseLabelNamePair lineNumber "Merge" line
                     |> (addLabelAndName labelLines nameLines labelTypes LabelType.Merge merges Label.Merge lineNumber)
             
+            | Section.Conveyors ->
+                result <-
+                    parseLabelNamePair lineNumber "Conveyor" line
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Conveyor conveyors Label.Conveyor lineNumber)
+
+            | Section.Conversions ->
+                result <-
+                    parseLabelNamePair lineNumber "Conversion" line
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Converison conversions Label.Conversion lineNumber)
+
             | Section.Links ->
                 result <-
                     parseLink lineNumber line
@@ -361,12 +375,94 @@ let parse (text: string) =
 
 
     result
+    |> Result.bind (fun () ->
+        (Ok (), buffers)
+        ||> Seq.fold (fun state (KeyValue(Label.Buffer label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Buffer {label} must have a source or a target"
+                | _, _ ->
+                    Ok ())))
+    |> Result.bind (fun () ->
+        (Ok (), constraints)
+        ||> Seq.fold (fun state (KeyValue(Label.Constraint label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Constraint {label} must have a source and a target"
+                | true, false ->
+                    Error $"Constraint {label} must have a target"
+                | false, true ->
+                    Error $"Constraint {label} must have a source"
+                | true, true ->
+                    Ok ())))
+    |> Result.bind (fun () ->
+        (Ok (), conversions)
+        ||> Seq.fold (fun state (KeyValue(Label.Conversion label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Conversion {label} must have a source and a target"
+                | true, false ->
+                    Error $"Conversion {label} must have a target"
+                | false, true ->
+                    Error $"Conversion {label} must have a source"
+                | true, true ->
+                    Ok ())))
+    |> Result.bind (fun () ->
+        (Ok (), conveyors)
+        ||> Seq.fold (fun state (KeyValue(Label.Conveyor label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Conveyor {label} must have a source and a target"
+                | true, false ->
+                    Error $"Conveyor {label} must have a target"
+                | false, true ->
+                    Error $"Conveyor {label} must have a source"
+                | true, true ->
+                    Ok ())))
+    |> Result.bind (fun () ->
+        (Ok (), splits)
+        ||> Seq.fold (fun state (KeyValue(Label.Split label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Split {label} must have a source and a target"
+                | true, false ->
+                    Error $"Split {label} must have a target"
+                | false, true ->
+                    Error $"Split {label} must have a source"
+                | true, true ->
+                    Ok ())))
+    |> Result.bind (fun () ->
+        (Ok (), merges)
+        ||> Seq.fold (fun state (KeyValue(Label.Merge label, name))->
+            state
+            |> Result.bind (fun () ->
+                match noSource.Contains name, noTarget.Contains name with
+                | false, false ->
+                    Error $"Merge {label} must have a source and a target"
+                | true, false ->
+                    Error $"Merge {label} must have a target"
+                | false, true ->
+                    Error $"Merge {label} must have a source"
+                | true, true ->
+                    Ok ())))
     |> Result.map (fun () ->
         {
             Buffers = buffers
             Constraints = constraints
             Splits = splits
             Merges = merges
+            Conveyors = conveyors
+            Conversions = conversions
             Links = HashSet linkLines.Keys
         })
 
@@ -379,6 +475,8 @@ b3
 b4
 b5
 b6
+b7
+b8
 
 [Constraints]
 // Another comment
@@ -390,12 +488,17 @@ s1
 [Merges]
 m1
 
+[Conveyors]
+conv1
+
 [Links]
 b1 -> c1
 c1 -> b2
 s1 -> b1, b3
 b4, b5 -> m1
 s1 -> b6
+b7 -> conv1
+conv1 -> b8
 """
 
 match parse text with
