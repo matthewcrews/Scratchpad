@@ -4,31 +4,39 @@ open System.Collections.Generic
 module Headers =
 
     [<Literal>]
-    let BUFFERS = "[Buffers]"
+    let BUFFERS = "[BUFFERS]"
     [<Literal>]
-    let CONSTRAINTS = "[Constraints]"
+    let CONSTRAINTS = "[CONSTRAINTS]"
     [<Literal>]
-    let MERGES = "[Merges]"
+    let MERGES = "[MERGES]"
     [<Literal>]
-    let SPLIT ="[Splits]"
+    let SPLITS ="[SPLITS]"
     [<Literal>]
-    let CONVEYORS = "[Conveyors]"
+    let CONVEYORS = "[CONVEYORS]"
     [<Literal>]
-    let CONVERSIONS = "[Conversions]"
+    let CONVERSIONS = "[CONVERSIONS]"
     [<Literal>]
-    let LINKS = "[Links]"
+    let LINKS = "[LINKS]"
 
 
 [<RequireQualifiedAccess>]
 type Section =
     | Buffers
     | Constraints
+    | Splits
     | Merges
+    | Conveyors
+    | Conversions
     | Links
     | None
 
 let (|IsWhitespace|_|) (x: string) =
     match String.IsNullOrWhiteSpace x with
+    | true -> Some ()
+    | false -> None
+
+let (|IsHeader|_|) (x: string) =
+    match x.Contains '[' && x.Contains ']' with
     | true -> Some ()
     | false -> None
 
@@ -38,8 +46,9 @@ let parseLabelNamePair (ln: int) (labelType: string) (b: string) =
     | [||] ->
         Error $"Invalid {labelType} on line {ln}. Missing Value and Label. Format should be <{labelType} Label>: <{labelType} Name>"
 
-    | [|_|] ->
-        Error $"Invalid {labelType} on line {ln}. Missing Value or Label. Format should be <{labelType} Label>: <{labelType} Name>"
+    | [|labelName|] ->
+        let newLabelName = labelName.Trim()
+        Ok (newLabelName, newLabelName)
 
     | [|label; name|] ->
         let newName = name.Trim()
@@ -84,10 +93,10 @@ module Label =
 type LabelType =
     | Buffer
     | Constraint
-    // | Split
-    // | Merge
-    // | Conveyor
-    // | Converison
+    | Split
+    | Merge
+    | Conveyor
+    | Converison
 
 
 [<NoComparison; NoEquality>]
@@ -129,6 +138,37 @@ let addLabelAndName
         | (true, labelPrevLineNumber), (true, namePrevLineNumber) ->
             Error $"Duplicate label {label} and name {name} on line {lineNumber}. Label previously declared on line {labelPrevLineNumber}. Name previously declared on line {namePrevLineNumber}")
 
+let parseHeader
+    lineNumber
+    (section: byref<Section>)
+    (header: string)
+    =
+
+    match header.ToUpper() with
+    | Headers.BUFFERS ->
+        section <- Section.Buffers
+        Ok ()
+    | Headers.CONSTRAINTS ->
+        section <- Section.Constraints
+        Ok ()
+    | Headers.SPLITS ->
+        section <- Section.Splits
+        Ok ()
+    | Headers.MERGES ->
+        section <- Section.Merges
+        Ok ()
+    | Headers.CONVEYORS ->
+        section <- Section.Conveyors
+        Ok ()
+    | Headers.CONVERSIONS ->
+        section <- Section.Conversions
+        Ok ()
+    | Headers.LINKS ->
+        section <- Section.Links
+        Ok ()
+    | _ ->
+        Error $"Unknown header {header} on line {lineNumber}"
+
 
 let parse (text: string) =
     let labelLines = Dictionary()
@@ -153,12 +193,10 @@ let parse (text: string) =
         match nextLine with
         | IsWhitespace -> 
             ()
-        | Headers.BUFFERS ->
-            section <- Section.Buffers
-        | Headers.CONSTRAINTS ->
-            section <- Section.Constraints
-        | Headers.LINKS ->
-            section <- Section.Links
+
+        | IsHeader ->
+            result <- parseHeader lineNumber &section nextLine
+
         | line ->
             match section with
             | Section.None ->
@@ -245,17 +283,15 @@ let text = """
 [Buffers]
 b1: Buffer 1
 b2: Buffer 2
-b3: Buffer 3
-b2: Buffer 1
+b3
 
 [Constraints]
-c1: Constraint 1
+c1
 
 [Links]
 b1 -> c1
 c1 -> b2
-b2 -> c1
-b1 -> b1
+b2 -> b3
 """
 
 match parse text with
