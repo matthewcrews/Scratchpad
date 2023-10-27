@@ -380,7 +380,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Buffer label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Buffer {label} must have a source or a target"
                 | _, _ ->
@@ -390,7 +390,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Constraint label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Constraint {label} must have a source and a target"
                 | true, false ->
@@ -404,7 +404,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Conversion label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Conversion {label} must have a source and a target"
                 | true, false ->
@@ -418,7 +418,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Conveyor label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Conveyor {label} must have a source and a target"
                 | true, false ->
@@ -432,7 +432,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Split label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Split {label} must have a source and a target"
                 | true, false ->
@@ -446,7 +446,7 @@ let parse (text: string) =
         ||> Seq.fold (fun state (KeyValue(Label.Merge label, name))->
             state
             |> Result.bind (fun () ->
-                match noSource.Contains name, noTarget.Contains name with
+                match noSource.Contains label, noTarget.Contains label with
                 | false, false ->
                     Error $"Merge {label} must have a source and a target"
                 | true, false ->
@@ -496,7 +496,9 @@ b1 -> c1
 c1 -> b2
 s1 -> b1, b3
 b4, b5 -> m1
+m1 -> b7
 s1 -> b6
+b8 -> s1
 b7 -> conv1
 conv1 -> b8
 """
