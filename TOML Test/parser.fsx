@@ -80,14 +80,14 @@ module Label =
     [<Struct>] type Conversion  = Conversion of string
 
 
-[<Struct>]
+[<Struct; RequireQualifiedAccess>]
 type LabelType =
     | Buffer
     | Constraint
-    | Split
-    | Merge
-    | Conveyor
-    | Converison
+    // | Split
+    // | Merge
+    // | Conveyor
+    // | Converison
 
 
 [<NoComparison; NoEquality>]
@@ -100,25 +100,48 @@ type ParseResult =
     }
 
 
-let addLabel (labels: HashSet<_>) (names: Dictionary<_,_>) labeler lineNumber input =
+let addLabelAndName
+    (labelLines: Dictionary<_,_>)
+    (nameLines: Dictionary<_,_>)
+    (labelTypes: Dictionary<_,_>)
+    labelType
+    (labelNames: Dictionary<_,_>)
+    labeler
+    lineNumber
+    input
+    =
+    
     input
     |> Result.bind (fun (label: string, name: string) ->
-        match labels.Add label with
-        | true ->
-            names[labeler label] <- name
+        match labelLines.TryGetValue label, nameLines.TryGetValue name with
+        | (false, _), (false, _) ->
+            labelTypes[label] <- labelType
+            labelNames[labeler label] <- name
+            labelLines[label] <- lineNumber
+            nameLines[name] <- lineNumber
             Ok ()
-        | false ->
-            Error $"Duplicate label {label} on line {lineNumber}")
+        | (false, _), (true, prevLineNumber) ->
+            Error $"Duplicate name {name} on line {lineNumber}. Name previously declared on line {prevLineNumber}"
+
+        | (true, prevLineNumber), (false, _) ->
+            Error $"Duplicate label {label} on line {lineNumber}. Label previously declared on line {prevLineNumber}"
+
+        | (true, labelPrevLineNumber), (true, namePrevLineNumber) ->
+            Error $"Duplicate label {label} and name {name} on line {lineNumber}. Label previously declared on line {labelPrevLineNumber}. Name previously declared on line {namePrevLineNumber}")
 
 
 let parse (text: string) =
-    let labels = HashSet()
+    let labelLines = Dictionary()
+    let nameLines = Dictionary()
     let links = HashSet()
     let buffers = Dictionary()
     let constraints = Dictionary()
     // let merges = Dictionary()
     let labelTypes = Dictionary<string, LabelType>()
     
+    let hasSource = HashSet()
+    let hasTarget = HashSet()
+
     let mutable section = Section.None
     let mutable result = Ok ()
     let mutable lineNumber = 0
@@ -129,7 +152,6 @@ let parse (text: string) =
 
         match nextLine with
         | IsWhitespace -> 
-            printfn "HERE"
             ()
         | Headers.BUFFERS ->
             section <- Section.Buffers
@@ -145,54 +167,65 @@ let parse (text: string) =
             | Section.Buffers ->
                 result <-
                     parseLabelNamePair lineNumber "Buffer" line
-                    |> (addLabel labels buffers Label.Buffer lineNumber)
-                    // |> Result.bind (fun (label, name) ->
-                    //     match labels.Add label with
-                    //     | true ->
-                    //         buffers[Label.Buffer label] <- name
-                    //         Ok ()
-                    //     | false ->
-                    //         Error $"Duplicate definition of label {label} on line {lineNumber}")
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Buffer buffers Label.Buffer lineNumber)
             
             | Section.Constraints ->
                 result <-
                     parseLabelNamePair lineNumber "Constraint" line
-                    |> Result.bind (fun (label, name) ->
-                        match labels.Add label with
-                        | true ->
-                            constraints[Label.Constraint label] <- name
-                            Ok ()
-                        | false ->
-                            Error $"Duplicate definition of label {label} on line {lineNumber}")
+                    |> (addLabelAndName labelLines nameLines labelTypes LabelType.Constraint constraints Label.Constraint lineNumber)
 
-            // | Section.Merges ->
-            //     result <-
-            //         parseLabelNamePair lineNumber "Merges" line
-            //         |> Result.bind (fun (label, name) ->
-            //             match labels.Add label with
-            //             | true ->
-            //                 merges[Label.Merge label] <- name
-            //                 Ok ()
-            //             | false ->
-            //                 Error $"Duplicate definition of Merge label {label} on line {lineNumber}")
-        
             | Section.Links ->
                 result <-
-                parseLink lineNumber line
-                |> Result.bind (fun (source, target) ->
-                    match labels.Contains source, labels.Contains target with
-                    | true, true ->
-                        match links.Add (source, target) with
-                        | true ->
-                            Ok ()
-                        | false ->
-                            Error $"Repeated link on line {lineNumber}. {source} is already connected to {target}"
-                    | false, true ->
-                        Error $"Invalid link on line {lineNumber}. The source {source} does not exist"
-                    | true, false ->
-                        Error $"Invalid link on line {lineNumber}. The target {target} does not exist"
-                    | false, false ->
-                        Error $"Invalid link on line {lineNumber}. The source {source} and the target {target} do not exist")
+                    parseLink lineNumber line
+                    |> Result.bind (fun (source, target) ->
+                        match labelTypes[source] with
+                        | LabelType.Buffer ->
+                            match hasTarget.Add source with
+                            | true -> 
+                                Ok (source, target)
+                            | false ->
+                                Error $"Invalid link on line {lineNumber}. Buffer {source} already has target."
+                        | LabelType.Constraint ->
+                            match hasTarget.Add source with
+                            | true -> 
+                                Ok (source, target)
+                            | false ->
+                                Error $"Invalid link on line {lineNumber}. Constraint {source} already has target.")
+                    |> Result.bind (fun (source, target) ->
+                        match labelTypes[target] with
+                        | LabelType.Buffer ->
+                            match hasSource.Add target with
+                            | true -> 
+                                Ok (source, target)
+                            | false ->
+                                Error $"Invalid link on line {lineNumber}. Buffer {target} already has source."
+
+                        | LabelType.Constraint ->
+                            match hasSource.Add target with
+                            | true -> 
+                                Ok (source, target)
+                            | false ->
+                                Error $"Invalid link on line {lineNumber}. Constraint {target} already has source.")
+                    |> Result.bind (fun (source, target) ->
+                        match labelLines.ContainsKey source, labelLines.ContainsKey target with
+                        | true, true ->
+                            match links.Add (source, target) with
+                            | true ->
+                                Ok ()
+
+                            | false ->
+                                Error $"Repeated link on line {lineNumber}. {source} is already connected to {target}"
+
+                        | false, true ->
+                            Error $"Invalid link on line {lineNumber}. The source {source} does not exist"
+
+                        | true, false ->
+                            Error $"Invalid link on line {lineNumber}. The target {target} does not exist"
+
+                        | false, false ->
+                            Error $"Invalid link on line {lineNumber}. The source {source} and the target {target} do not exist")
+                        
+                        
 
         nextLine <- reader.ReadLine()
         lineNumber <- lineNumber + 1
@@ -213,6 +246,7 @@ let text = """
 b1: Buffer 1
 b2: Buffer 2
 b3: Buffer 3
+b2: Buffer 1
 
 [Constraints]
 c1: Constraint 1
@@ -220,8 +254,10 @@ c1: Constraint 1
 [Links]
 b1 -> c1
 c1 -> b2
-
+b2 -> c1
+b1 -> b1
 """
 
-let parseResult = parse text
-parseResult
+match parse text with
+| Ok m -> printfn $"{m}"
+| Error err -> printfn $"{err}"
